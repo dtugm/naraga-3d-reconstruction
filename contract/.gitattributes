@@ -1,0 +1,5 @@
+# Everything in contract/ is vendored byte-for-byte and diffed byte-for-byte by CI.
+# Never let git normalize line endings here — a consumer repo with `* text=auto`
+# (or a checkout on an autocrlf machine) would silently rewrite the files and fail
+# every drift check.
+* -text

@@ -1,0 +1,2537 @@
+openapi: 3.1.0
+info:
+  title: NARAGA API
+  version: 1.0.0
+  x-contract-version: 1.0.0
+  description: |
+    Canonical, machine-readable contract for NARAGA — AI-powered geospatial processing.
+
+    THIS FILE IS THE SINGLE SOURCE OF TRUTH. TypeScript types and Pydantic models are
+    generated from it; do not hand-edit generated output. CI fails on drift.
+
+    Deviations from "NARAGA API Contract.pdf" are enumerated in CONTRACT-CHANGES.md.
+
+    Conventions
+    - Every field is snake_case and identical across the Gateway and all services.
+    - Timestamps are RFC3339 UTC, millisecond precision, literal `Z`.
+    - bbox is ALWAYS EPSG:4326 [min_lon, min_lat, max_lon, max_lat], regardless of `crs`.
+    - All models forbid unknown properties, so a typo 422s rather than being silently
+      dropped. Standalone objects use additionalProperties: false. Composed models
+      (allOf over an OPEN base) use unevaluatedProperties: false at the composed level
+      instead — putting additionalProperties: false inside an allOf arm makes the
+      schema unsatisfiable in draft 2020-12, because each arm validates in isolation
+      and rejects the other arm's properties.
+servers:
+  - url: https://api.naraga.id/v1
+    description: Public gateway (frontend-facing)
+  - url: http://localhost:8080/v1
+    description: Local gateway
+
+tags:
+  - name: auth
+  - name: users
+  - name: datasets
+  - name: jobs
+  - name: notifications
+  - name: internal
+    description: Gateway <-> service mesh. Never exposed publicly.
+
+components:
+  securitySchemes:
+    accessToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Frontend -> Gateway. 15 min TTL.
+    internalServiceToken:
+      type: http
+      scheme: bearer
+      description: |
+        Gateway <-> Service, both directions. Distinct secret per service AND per
+        direction. `kid` header supports dual-key rotation. The gateway MUST verify
+        that a callback's calling service matches `job.service`.
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      description: 1-based page number.
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: page_size
+      in: query
+      description: Items per page. Values above maximum return 422 (never silently clamped).
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: |
+        Required on credit-mutating requests. The original response is replayed for
+        24h, so a client retry after a timeout cannot double-debit.
+      required: false
+      schema: { type: string, format: uuid }
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      schema: { type: string }
+    ServicePathSegment:
+      name: service
+      in: path
+      required: true
+      description: |
+        The path_segment from services.yaml — NEVER derived by string transform
+        (landcover_detection and reconstruction_3d both break a naive one). Kebab-case;
+        distinct from the snake_case ServiceName enum used in payloads.
+      schema: { type: string, enum: [building-extraction, pointcloud-classification, landcover-detection, reconstruction-3d, converter] }
+
+  schemas:
+    # ---------- primitives ----------
+    Timestamp:
+      type: string
+      format: date-time
+      description: |
+        RFC3339 UTC. Producers MUST serialize with millisecond precision and a literal
+        `Z` (e.g. 2026-09-01T03:00:00.000Z) — Python's default isoformat() emits
+        microseconds and no Z, JS toISOString() emits milliseconds and Z. Timezone-naive
+        values are rejected. Consumers MUST accept any valid RFC3339 instant.
+        (No regex `pattern` here on purpose: with format=date-time, generators emit a
+        real datetime type and a string pattern cannot be applied to it.)
+      examples: ['2026-09-01T03:00:00.000Z']
+
+    Bbox:
+      type: array
+      description: |
+        ALWAYS EPSG:4326 decimal degrees, regardless of the dataset's `crs`.
+        Antimeridian-crossing extents are expressed with min_lon > max_lon.
+      prefixItems:
+        - { type: number, minimum: -180, maximum: 180, description: min_lon }
+        - { type: number, minimum: -90, maximum: 90, description: min_lat }
+        - { type: number, minimum: -180, maximum: 180, description: max_lon }
+        - { type: number, minimum: -90, maximum: 90, description: max_lat }
+      items: { type: number }
+      minItems: 4
+      maxItems: 4
+      examples: [[110.36, -7.82, 110.42, -7.78]]
+
+    Crs:
+      type: string
+      description: Authority:code form only. Not WKT, not a bare integer.
+      pattern: '^EPSG:[0-9]{4,6}$'
+      examples: ['EPSG:4326', 'EPSG:32749']
+
+    # ---------- enums ----------
+    ServiceName:
+      type: string
+      enum: [building_extraction, pointcloud_classification, landcover_detection, reconstruction_3d, converter]
+
+    JobStatus:
+      type: string
+      enum: [draft, queued, processing, complete, failed, cancelled]
+
+    ServiceReportedStatus:
+      type: string
+      description: |
+        The only statuses a service may report. `draft`/`queued`/`cancelled` are
+        gateway-owned; a service reporting them could make a running job re-submittable.
+      enum: [processing, complete, failed]
+
+    DatasetFormat:
+      type: string
+      description: Container/encoding. Orthogonal to DatasetRole — a DTM *is* a GeoTIFF.
+      enum: [geotiff, cog, las, laz, geojson, pmtiles, 3dtiles, gltf, gml, shp, obj, xyz, ply]
+
+    DatasetRole:
+      type: string
+      description: |
+        Semantic meaning, independent of container. Splitting this out is what makes the
+        classify -> reconstruct pipeline expressible (see CONTRACT-CHANGES.md A1).
+      enum: [orthophoto, dem, dtm, dsm, point_cloud, building_outline, landcover, mesh, aoi]
+
+    DatasetSource:
+      type: string
+      enum: [uploaded, generated]
+
+    DatasetStatus:
+      type: string
+      enum: [processing, ready, failed]
+
+    UserRole:
+      type: string
+      enum: [individual, research, enterprise_admin, enterprise_member]
+
+    CreditTransactionType:
+      type: string
+      enum: [job_debit, job_refund, topup, grant]
+
+    NotificationType:
+      type: string
+      enum: [job_complete, job_failed, dataset_ready, dataset_failed, credit_low, system]
+
+    ErrorCode:
+      type: string
+      description: Closed enum so clients branch on codes, never on human-readable messages.
+      enum:
+        - VALIDATION_ERROR
+        - UNAUTHENTICATED
+        - FORBIDDEN
+        - NOT_FOUND
+        - CONFLICT
+        - INSUFFICIENT_CREDITS
+        - STORAGE_QUOTA_EXCEEDED
+        - DATASET_NOT_READY
+        - DATASET_IN_USE
+        - INVALID_MODEL_FOR_SERVICE
+        - MISSING_REQUIRED_INPUT
+        - JOB_INVALID_STATE_TRANSITION
+        - JOB_NOT_DELETABLE
+        - JOB_TIMEOUT
+        - UNSUPPORTED_CONVERSION
+        - CRS_MISMATCH
+        - RATE_LIMITED
+        - INTERNAL_ERROR
+
+    # ---------- envelopes ----------
+    Meta:
+      type: object
+      required: [request_id, timestamp]
+      additionalProperties: false
+      properties:
+        request_id: { type: string }
+        timestamp: { $ref: '#/components/schemas/Timestamp' }
+
+    PageMeta:
+      type: object
+      description: |
+        Deliberately restates Meta's fields instead of allOf-extending it: Meta is
+        closed (additionalProperties: false), and a closed schema cannot be extended
+        via allOf in draft 2020-12 — the Meta arm would reject the pagination fields.
+      required: [request_id, timestamp, total, page, page_size, total_pages]
+      additionalProperties: false
+      properties:
+        request_id: { type: string }
+        timestamp: { $ref: '#/components/schemas/Timestamp' }
+        total: { type: integer, minimum: 0 }
+        page: { type: integer, minimum: 1 }
+        page_size: { type: integer, minimum: 1 }
+        total_pages: { type: integer, minimum: 0 }
+
+    ErrorResponse:
+      type: object
+      required: [error, meta]
+      additionalProperties: false
+      properties:
+        error:
+          type: object
+          required: [code, message, details]
+          additionalProperties: false
+          properties:
+            code: { $ref: '#/components/schemas/ErrorCode' }
+            message: { type: string }
+            details:
+              oneOf: [{ type: object }, { type: 'null' }]
+        meta: { $ref: '#/components/schemas/Meta' }
+
+    # ---------- entities ----------
+    Organization:
+      type: object
+      description: |
+        Every user belongs to exactly one organization. On register the gateway creates
+        a personal org (`is_personal: true`) owned by that user, so `organization_id` is
+        never null and org-scoping needs no special case for individuals.
+
+        This replaces the PDF's free-text `User.organization` (CONTRACT-CHANGES C3):
+        string equality would have leaked data between two companies both typing "Acme".
+      required: [organization_id, name, is_personal, owner_id, created_at, updated_at]
+      additionalProperties: false
+      properties:
+        organization_id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        is_personal:
+          type: boolean
+          description: Auto-created single-member org. Cannot be renamed or have members added.
+        owner_id: { type: string, format: uuid }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+
+    User:
+      type: object
+      required: [id, email, name, organization_id, role, credits_remaining,
+                 storage_used_bytes, storage_quota_bytes, created_at, updated_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        organization_id:
+          type: string
+          format: uuid
+          description: Never null — a personal org is created at registration.
+        role: { $ref: '#/components/schemas/UserRole' }
+        credits_remaining: { type: integer, minimum: 0 }
+        storage_used_bytes: { type: integer, minimum: 0, format: int64 }
+        storage_quota_bytes: { type: integer, minimum: 0, format: int64, default: 5368709120 }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+      # `api_token` is intentionally absent (CONTRACT-CHANGES C4): dropped for v1.
+
+    Session:
+      type: object
+      description: |
+        `refresh_token` is deliberately NOT here. It is transported only as an
+        HttpOnly; Secure; SameSite=Strict cookie (CONTRACT-CHANGES C1), so JS can
+        never read it and XSS cannot exfiltrate it.
+      required: [session_id, user_id, access_token, access_token_expires_at,
+                 refresh_token_expires_at, user_agent, created_at]
+      additionalProperties: false
+      properties:
+        session_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        access_token: { type: string }
+        access_token_expires_at: { $ref: '#/components/schemas/Timestamp' }
+        refresh_token_expires_at: { $ref: '#/components/schemas/Timestamp' }
+        user_agent: { type: string }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+
+    Dataset:
+      type: object
+      required: [dataset_id, owner_id, name, dataset_format, dataset_role, source,
+                 source_job_id, source_service, storage_key, size_bytes, crs, bbox,
+                 status, error_code, error_message, created_at, updated_at]
+      additionalProperties: false
+      properties:
+        dataset_id: { type: string, format: uuid }
+        owner_id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 255 }
+        dataset_format: { $ref: '#/components/schemas/DatasetFormat' }
+        dataset_role:
+          oneOf: [{ $ref: '#/components/schemas/DatasetRole' }, { type: 'null' }]
+        source: { $ref: '#/components/schemas/DatasetSource' }
+        source_job_id:
+          oneOf: [{ type: string, format: uuid }, { type: 'null' }]
+          description: Non-null iff source == generated.
+        source_service:
+          oneOf: [{ $ref: '#/components/schemas/ServiceName' }, { type: 'null' }]
+          description: Non-null iff source == generated.
+        storage_key: { type: string }
+        size_bytes: { type: integer, minimum: 0, format: int64 }
+        crs:
+          oneOf: [{ $ref: '#/components/schemas/Crs' }, { type: 'null' }]
+          description: MUST be non-null once status == ready.
+        bbox:
+          oneOf: [{ $ref: '#/components/schemas/Bbox' }, { type: 'null' }]
+        status: { $ref: '#/components/schemas/DatasetStatus' }
+        error_code:
+          oneOf: [{ $ref: '#/components/schemas/ErrorCode' }, { type: 'null' }]
+        error_message:
+          oneOf: [{ type: string }, { type: 'null' }]
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+
+    DatasetDraft:
+      type: object
+      description: |
+        What a SERVICE returns in a callback — only what it can actually know.
+        A service never sees the DB or the User table, so it cannot mint dataset_id,
+        owner_id, or timestamps (CONTRACT-CHANGES A2). The GATEWAY mints identity:
+        dataset_id, owner_id (from job.owner_id), source=generated, source_job_id,
+        source_service, status, created_at, updated_at.
+      required: [name, dataset_format, dataset_role, storage_key, size_bytes, crs, bbox]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 255 }
+        dataset_format: { $ref: '#/components/schemas/DatasetFormat' }
+        dataset_role:
+          oneOf: [{ $ref: '#/components/schemas/DatasetRole' }, { type: 'null' }]
+        storage_key:
+          type: string
+          description: MUST be under the job's `output_prefix`.
+        size_bytes: { type: integer, minimum: 0, format: int64 }
+        crs: { $ref: '#/components/schemas/Crs' }
+        bbox:
+          oneOf: [{ $ref: '#/components/schemas/Bbox' }, { type: 'null' }]
+
+    CreditTransaction:
+      type: object
+      required: [transaction_id, user_id, job_id, amount, type, balance_after, created_at]
+      additionalProperties: false
+      properties:
+        transaction_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        job_id:
+          oneOf: [{ type: string, format: uuid }, { type: 'null' }]
+        amount:
+          type: integer
+          description: Negative = debit, positive = credit. Credits are indivisible.
+        type: { $ref: '#/components/schemas/CreditTransactionType' }
+        balance_after: { type: integer, minimum: 0 }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+
+    Notification:
+      type: object
+      required: [notification_id, user_id, job_id, type, message, action_url, read, created_at]
+      additionalProperties: false
+      properties:
+        notification_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        job_id:
+          oneOf: [{ type: string, format: uuid }, { type: 'null' }]
+        type: { $ref: '#/components/schemas/NotificationType' }
+        message: { type: string }
+        action_url:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: Deep link. Lets `system`/`credit_low` (which have no job_id) be actionable.
+        read: { type: boolean }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+
+    # ---------- per-service params / results / inputs ----------
+    # This block is the highest-leverage fix in the contract: the PDF expressed all of
+    # it as `// comments` around `params: object`, which generates Record<string,unknown>
+    # / dict[str,Any] — no type safety exactly where 6 teams integrate.
+
+    BuildingExtractionParams:
+      type: object
+      required: [model, output_formats]
+      additionalProperties: false
+      properties:
+        model: { type: string, enum: [cascade_building, geocarta] }
+        output_formats:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string, enum: [geojson, pmtiles] }
+        output_crs:
+          oneOf: [{ $ref: '#/components/schemas/Crs' }, { type: 'null' }]
+      # NOTE: params.aoi_geojson deleted (CONTRACT-CHANGES A6). AOI travels exactly one
+      # way: input_datasets.aoi. Two channels with no precedence rule meant validating
+      # against one AOI while processing another — wrong result, wrong bill, no error.
+
+    BuildingExtractionInputs:
+      type: object
+      required: [aoi]
+      additionalProperties: false
+      properties:
+        aoi: { type: string, format: uuid }
+
+    BuildingExtractionResult:
+      type: object
+      required: [building_count, area_km2, confidence_avg_percent, output_formats_generated]
+      additionalProperties: false
+      properties:
+        building_count: { type: integer, minimum: 0 }
+        area_km2: { type: number, minimum: 0 }
+        confidence_avg_percent: { type: number, minimum: 0, maximum: 100 }
+        output_formats_generated:
+          type: array
+          items: { type: string, enum: [geojson, pmtiles] }
+
+    PointCloudClassificationParams:
+      type: object
+      required: [model, output_formats]
+      additionalProperties: false
+      properties:
+        model: { type: string, enum: [csf, dgcnn] }
+        output_formats:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string, enum: [las, laz, 3dtiles, geotiff] }
+        output_crs:
+          oneOf: [{ $ref: '#/components/schemas/Crs' }, { type: 'null' }]
+
+    PointCloudClassificationInputs:
+      type: object
+      required: [point_cloud]
+      additionalProperties: false
+      properties:
+        point_cloud: { type: string, format: uuid }
+
+    PointCloudClassificationResult:
+      type: object
+      description: |
+        A `geotiff` output from this service carries `dataset_role: dtm` or `dsm`, so its
+        result can feed 3D Reconstruction's `elevation_source: dtm_dsm` path directly.
+        This is the pipeline the PDF's single `dataset_type` enum made inexpressible
+        (CONTRACT-CHANGES A1).
+      required: [points_total, points_by_class, output_formats_generated]
+      additionalProperties: false
+      properties:
+        points_total: { type: integer, minimum: 0 }
+        points_by_class:
+          type: object
+          description: |
+            Keyed map, not a fixed struct: `csf` (a ground filter) and `dgcnn` (a learned
+            classifier) emit DIFFERENT class sets. Counts MUST sum to points_total.
+            Discover a model's classes at runtime via /capabilities rather than
+            hardcoding keys in the UI.
+          additionalProperties: { type: integer, minimum: 0 }
+          examples: [{ ground: 120, vegetation: 80, building: 40, unclassified: 5 }]
+        output_formats_generated:
+          type: array
+          items: { type: string, enum: [las, laz, 3dtiles, geotiff] }
+
+    LandcoverDetectionParams:
+      type: object
+      required: [model, output_formats]
+      additionalProperties: false
+      properties:
+        model:
+          type: string
+          enum: [pandala]
+          description: Only one model — do NOT render as a choice in the UI.
+        output_formats:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string, enum: [geojson, pmtiles] }
+        output_crs:
+          oneOf: [{ $ref: '#/components/schemas/Crs' }, { type: 'null' }]
+
+    LandcoverDetectionInputs:
+      type: object
+      required: [orthophoto, aoi]
+      additionalProperties: false
+      properties:
+        orthophoto: { type: string, format: uuid }
+        aoi:
+          type: string
+          format: uuid
+          description: |
+            Always a dataset UUID. The PDF's `Dataset|geojson` union was the only union
+            among the five services and was unreachable from the public API, which
+            accepts only UUIDs (CONTRACT-CHANGES A6).
+
+    LandcoverDetectionResult:
+      type: object
+      required: [area_km2, classes, output_formats_generated]
+      additionalProperties: false
+      properties:
+        area_km2: { type: number, minimum: 0 }
+        classes:
+          type: array
+          items:
+            type: object
+            required: [name, area_km2, percent]
+            additionalProperties: false
+            properties:
+              name: { type: string }
+              area_km2: { type: number, minimum: 0 }
+              percent: { type: number, minimum: 0, maximum: 100 }
+          description: percent values MUST sum to 100 +/- 0.01.
+        output_formats_generated:
+          type: array
+          items: { type: string, enum: [geojson, pmtiles] }
+
+    Reconstruction3dParams:
+      type: object
+      description: |
+        elevation_source discriminates which inputs are required. The PDF stated this
+        only in a comment, so generators emitted independent optionals and validated
+        nothing — a mismatched job passed validation, debited credits, then died inside
+        the worker (CONTRACT-CHANGES A5).
+      required: [model, elevation_source, output_formats]
+      additionalProperties: false
+      properties:
+        model: { type: string, enum: [dream3d, cascade_mesh] }
+        elevation_source: { type: string, enum: [pointcloud, dtm_dsm] }
+        output_formats:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string, enum: [gltf, 3dtiles] }
+        output_crs:
+          oneOf: [{ $ref: '#/components/schemas/Crs' }, { type: 'null' }]
+
+    Reconstruction3dInputs:
+      type: object
+      required: [building_outline]
+      additionalProperties: false
+      properties:
+        building_outline: { type: string, format: uuid }
+        point_cloud: { type: string, format: uuid }
+        dtm: { type: string, format: uuid }
+        dsm: { type: string, format: uuid }
+        remote_sensing: { type: string, format: uuid }
+      x-cross-field-validation: |
+        Which inputs are required depends on params.elevation_source, which lives in a
+        SIBLING object — JSON Schema cannot express a constraint across siblings, so no
+        if/then here (an earlier attempt conditioned on a property this closed schema
+        can never contain, which made the schema unsatisfiable). The GATEWAY MUST
+        enforce, at POST /jobs, PATCH /jobs/{id}, and /submit:
+          - elevation_source == pointcloud  ->  point_cloud required; dtm, dsm forbidden
+          - elevation_source == dtm_dsm     ->  dtm and dsm required; point_cloud forbidden
+        returning 422 MISSING_REQUIRED_INPUT with details.missing_input_keys.
+        Services MUST re-check on the InternalJobRequest they receive.
+
+    Reconstruction3dResult:
+      type: object
+      required: [mesh_triangle_count, buildings_reconstructed, output_formats_generated]
+      additionalProperties: false
+      properties:
+        mesh_triangle_count: { type: integer, minimum: 0 }
+        buildings_reconstructed: { type: integer, minimum: 0 }
+        output_formats_generated:
+          type: array
+          items: { type: string, enum: [gltf, 3dtiles] }
+
+    ConverterParams:
+      type: object
+      required: [target_format]
+      additionalProperties: false
+      properties:
+        target_format:
+          type: string
+          enum: [3dtiles, pmtiles, geojson, cog, las, laz, gltf]
+        output_crs:
+          oneOf: [{ $ref: '#/components/schemas/Crs' }, { type: 'null' }]
+      # Legal (source_format -> target_format) pairs are served at runtime by
+      # GET /v1/internal/converter/capabilities so the UI never offers an impossible
+      # conversion. The PDF left all 119 pairs unspecified (CONTRACT-CHANGES D11).
+
+    ConverterInputs:
+      type: object
+      required: [input]
+      additionalProperties: false
+      properties:
+        input: { type: string, format: uuid }
+
+    ConverterResult:
+      type: object
+      required: [output_format, output_size_bytes]
+      additionalProperties: false
+      properties:
+        output_format: { $ref: '#/components/schemas/DatasetFormat' }
+        output_size_bytes: { type: integer, minimum: 0, format: int64 }
+
+    # ---------- Job (discriminated union on `service`) ----------
+    JobBase:
+      type: object
+      required: [job_id, owner_id, service, status, job_name, output_dataset_ids,
+                 credits_estimated, credits_used, progress_percent, error_code,
+                 error_message, created_at, started_at, completed_at, updated_at]
+      properties:
+        job_id: { type: string, format: uuid }
+        owner_id: { type: string, format: uuid }
+        service: { $ref: '#/components/schemas/ServiceName' }
+        status: { $ref: '#/components/schemas/JobStatus' }
+        job_name: { type: string, minLength: 1, maxLength: 255 }
+        output_dataset_ids:
+          type: array
+          items: { type: string, format: uuid }
+        credits_estimated: { type: integer, minimum: 0 }
+        credits_used:
+          oneOf: [{ type: integer, minimum: 0 }, { type: 'null' }]
+          description: Reported by the service in the terminal callback. Null until terminal.
+        progress_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: |
+            Integer, not number (the PDF said `integer` on Job but `number` in the
+            callback; a Python 66.6667 would truncate or 500 the handler).
+            Monotonic — the gateway drops backwards progress. status=complete implies 100.
+        error_code:
+          oneOf: [{ $ref: '#/components/schemas/ErrorCode' }, { type: 'null' }]
+        error_message:
+          oneOf: [{ type: string }, { type: 'null' }]
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        started_at:
+          oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }]
+          description: Set by the GATEWAY when it receives the service's first processing callback.
+        completed_at:
+          oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }]
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+
+    BuildingExtractionJob:
+      # Closed via unevaluatedProperties at the composed level, NOT
+      # additionalProperties: false inside the arm — the arm validates in isolation
+      # and would reject every JobBase field, making the schema unsatisfiable.
+      # Same idiom on all five Job variants.
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/JobBase'
+        - type: object
+          required: [service, model, input_dataset_ids, params, result_summary]
+          properties:
+            service: { type: string, const: building_extraction }
+            model: { type: string, enum: [cascade_building, geocarta] }
+            input_dataset_ids: { $ref: '#/components/schemas/BuildingExtractionInputs' }
+            params: { $ref: '#/components/schemas/BuildingExtractionParams' }
+            result_summary:
+              oneOf: [{ $ref: '#/components/schemas/BuildingExtractionResult' }, { type: 'null' }]
+
+    PointCloudClassificationJob:
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/JobBase'
+        - type: object
+          required: [service, model, input_dataset_ids, params, result_summary]
+          properties:
+            service: { type: string, const: pointcloud_classification }
+            model: { type: string, enum: [csf, dgcnn] }
+            input_dataset_ids: { $ref: '#/components/schemas/PointCloudClassificationInputs' }
+            params: { $ref: '#/components/schemas/PointCloudClassificationParams' }
+            result_summary:
+              oneOf: [{ $ref: '#/components/schemas/PointCloudClassificationResult' }, { type: 'null' }]
+
+    LandcoverDetectionJob:
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/JobBase'
+        - type: object
+          required: [service, model, input_dataset_ids, params, result_summary]
+          properties:
+            service: { type: string, const: landcover_detection }
+            model: { type: string, enum: [pandala] }
+            input_dataset_ids: { $ref: '#/components/schemas/LandcoverDetectionInputs' }
+            params: { $ref: '#/components/schemas/LandcoverDetectionParams' }
+            result_summary:
+              oneOf: [{ $ref: '#/components/schemas/LandcoverDetectionResult' }, { type: 'null' }]
+
+    Reconstruction3dJob:
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/JobBase'
+        - type: object
+          required: [service, model, input_dataset_ids, params, result_summary]
+          properties:
+            service: { type: string, const: reconstruction_3d }
+            model: { type: string, enum: [dream3d, cascade_mesh] }
+            input_dataset_ids: { $ref: '#/components/schemas/Reconstruction3dInputs' }
+            params: { $ref: '#/components/schemas/Reconstruction3dParams' }
+            result_summary:
+              oneOf: [{ $ref: '#/components/schemas/Reconstruction3dResult' }, { type: 'null' }]
+
+    ConverterJob:
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/JobBase'
+        - type: object
+          required: [service, model, input_dataset_ids, params, result_summary]
+          properties:
+            service: { type: string, const: converter }
+            model:
+              type: 'null'
+              description: |
+                Converter has no model. The PDF made Job.model a required non-null
+                string while listing no models for converter, so every converter job
+                had to send a value that could not validate (CONTRACT-CHANGES A7).
+            input_dataset_ids: { $ref: '#/components/schemas/ConverterInputs' }
+            params: { $ref: '#/components/schemas/ConverterParams' }
+            result_summary:
+              oneOf: [{ $ref: '#/components/schemas/ConverterResult' }, { type: 'null' }]
+
+    Job:
+      oneOf:
+        - $ref: '#/components/schemas/BuildingExtractionJob'
+        - $ref: '#/components/schemas/PointCloudClassificationJob'
+        - $ref: '#/components/schemas/LandcoverDetectionJob'
+        - $ref: '#/components/schemas/Reconstruction3dJob'
+        - $ref: '#/components/schemas/ConverterJob'
+      discriminator:
+        propertyName: service
+        mapping:
+          building_extraction: '#/components/schemas/BuildingExtractionJob'
+          pointcloud_classification: '#/components/schemas/PointCloudClassificationJob'
+          landcover_detection: '#/components/schemas/LandcoverDetectionJob'
+          reconstruction_3d: '#/components/schemas/Reconstruction3dJob'
+          converter: '#/components/schemas/ConverterJob'
+
+    # ---------- callback ----------
+    JobCallback:
+      type: object
+      description: |
+        Service -> Gateway. POST {gateway_internal_url}/v1/internal/jobs/{job_id}/callback
+        Auth: Bearer <internal_service_token>. The gateway MUST reject a callback whose
+        calling service does not match job.service.
+
+        Delivery is AT-LEAST-ONCE with retries (1s,2s,4s,8s,16s,60s; max 10 attempts;
+        retry on 5xx/timeout only, never 4xx). Services MUST persist unacknowledged
+        terminal callbacks and resume retrying after their own restart.
+
+        Gateway rules:
+          - drop if sequence <= last processed sequence for this job (out-of-order/replay)
+          - drop non-terminal callbacks once the job is terminal
+          - a terminal callback for a `cancelled` job is ignored and its outputs GC'd
+          - handling is idempotent on (job_id, sequence)
+      required: [job_id, sequence, emitted_at, status, progress_percent,
+                 output_datasets, result_summary, credits_used, error_code, error_message]
+      additionalProperties: false
+      properties:
+        job_id: { type: string, format: uuid }
+        sequence:
+          type: integer
+          minimum: 0
+          description: Monotonic per job, assigned by the service. Enables replay/reorder rejection.
+        emitted_at: { $ref: '#/components/schemas/Timestamp' }
+        status: { $ref: '#/components/schemas/ServiceReportedStatus' }
+        progress_percent: { type: integer, minimum: 0, maximum: 100 }
+        output_datasets:
+          type: array
+          description: Empty unless status == complete. Drafts, not Datasets (see DatasetDraft).
+          items: { $ref: '#/components/schemas/DatasetDraft' }
+        result_summary:
+          oneOf:
+            - $ref: '#/components/schemas/BuildingExtractionResult'
+            - $ref: '#/components/schemas/PointCloudClassificationResult'
+            - $ref: '#/components/schemas/LandcoverDetectionResult'
+            - $ref: '#/components/schemas/Reconstruction3dResult'
+            - $ref: '#/components/schemas/ConverterResult'
+            - type: 'null'
+        credits_used:
+          oneOf: [{ type: integer, minimum: 0 }, { type: 'null' }]
+          description: Actual consumption. Required when status is terminal.
+        error_code:
+          oneOf: [{ $ref: '#/components/schemas/ErrorCode' }, { type: 'null' }]
+        error_message:
+          oneOf: [{ type: string }, { type: 'null' }]
+
+    JobCallbackAck:
+      type: object
+      required: [received]
+      additionalProperties: false
+      properties:
+        received: { type: boolean, const: true }
+
+    # ---------- request bodies ----------
+    RegisterRequest:
+      type: object
+      required: [email, password, name]
+      additionalProperties: false
+      properties:
+        email: { type: string, format: email }
+        password:
+          type: string
+          minLength: 12
+          maxLength: 256
+          description: Min 12 chars. Rejected against a common-password denylist.
+        name: { type: string, minLength: 1, maxLength: 200 }
+        organization_name:
+          type: string
+          maxLength: 200
+          description: |
+            Optional display name for the personal organization created alongside the
+            user. Defaults to the user's name. Does NOT join an existing organization —
+            that requires an invite.
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      additionalProperties: false
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+
+    LogoutRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        all_devices: { type: boolean, default: false }
+
+    UpdateUserRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+
+    UpdateOrganizationRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+
+    CreateUploadRequest:
+      type: object
+      description: |
+        Step 1 of the presigned direct-to-storage upload. The PDF's single multipart
+        POST cannot carry the multi-GB LAS/LAZ files this platform exists to process
+        (CONTRACT-CHANGES D7). size_bytes is checked against remaining quota BEFORE
+        any URL is issued.
+      required: [name, dataset_format, size_bytes]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 255 }
+        dataset_format: { $ref: '#/components/schemas/DatasetFormat' }
+        dataset_role:
+          oneOf: [{ $ref: '#/components/schemas/DatasetRole' }, { type: 'null' }]
+        size_bytes: { type: integer, minimum: 1, format: int64 }
+        content_type: { type: string }
+
+    CreateUploadResponse:
+      type: object
+      required: [upload_id, method, part_size_bytes, urls, expires_at]
+      additionalProperties: false
+      properties:
+        upload_id: { type: string }
+        method: { type: string, enum: [put, multipart] }
+        part_size_bytes: { type: integer, minimum: 1, format: int64 }
+        urls:
+          type: array
+          items:
+            type: object
+            required: [part_number, url]
+            additionalProperties: false
+            properties:
+              part_number: { type: integer, minimum: 1 }
+              url: { type: string }
+        expires_at: { $ref: '#/components/schemas/Timestamp' }
+
+    CompleteUploadRequest:
+      type: object
+      required: [parts]
+      additionalProperties: false
+      properties:
+        parts:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [part_number, etag]
+            additionalProperties: false
+            properties:
+              part_number: { type: integer, minimum: 1 }
+              etag: { type: string }
+
+    CreateJobRequest:
+      description: |
+        Discriminated on `service` so `params`, `model`, and `input_dataset_ids` are
+        validated together. All referenced datasets MUST be status=ready at both create
+        and submit (422 DATASET_NOT_READY otherwise) — a draft may be submitted days later.
+      oneOf:
+        - $ref: '#/components/schemas/CreateBuildingExtractionJobRequest'
+        - $ref: '#/components/schemas/CreatePointCloudClassificationJobRequest'
+        - $ref: '#/components/schemas/CreateLandcoverDetectionJobRequest'
+        - $ref: '#/components/schemas/CreateReconstruction3dJobRequest'
+        - $ref: '#/components/schemas/CreateConverterJobRequest'
+      discriminator:
+        propertyName: service
+        mapping:
+          building_extraction: '#/components/schemas/CreateBuildingExtractionJobRequest'
+          pointcloud_classification: '#/components/schemas/CreatePointCloudClassificationJobRequest'
+          landcover_detection: '#/components/schemas/CreateLandcoverDetectionJobRequest'
+          reconstruction_3d: '#/components/schemas/CreateReconstruction3dJobRequest'
+          converter: '#/components/schemas/CreateConverterJobRequest'
+
+    CreateJobRequestBase:
+      type: object
+      required: [service, job_name, input_dataset_ids, params]
+      properties:
+        job_name: { type: string, minLength: 1, maxLength: 255 }
+        save_as_draft:
+          type: boolean
+          default: true
+          description: |
+            false creates the job already queued AND debits credits immediately —
+            it can therefore return 402, which the PDF documented only on /submit
+            (CONTRACT-CHANGES M7).
+
+    CreateBuildingExtractionJobRequest:
+      allOf:
+        - $ref: '#/components/schemas/CreateJobRequestBase'
+        - type: object
+          required: [service, model, input_dataset_ids, params]
+          additionalProperties: false
+          properties:
+            service: { type: string, const: building_extraction }
+            model: { type: string, enum: [cascade_building, geocarta] }
+            job_name: { type: string }
+            save_as_draft: { type: boolean }
+            input_dataset_ids: { $ref: '#/components/schemas/BuildingExtractionInputs' }
+            params: { $ref: '#/components/schemas/BuildingExtractionParams' }
+
+    CreatePointCloudClassificationJobRequest:
+      allOf:
+        - $ref: '#/components/schemas/CreateJobRequestBase'
+        - type: object
+          required: [service, model, input_dataset_ids, params]
+          additionalProperties: false
+          properties:
+            service: { type: string, const: pointcloud_classification }
+            model: { type: string, enum: [csf, dgcnn] }
+            job_name: { type: string }
+            save_as_draft: { type: boolean }
+            input_dataset_ids: { $ref: '#/components/schemas/PointCloudClassificationInputs' }
+            params: { $ref: '#/components/schemas/PointCloudClassificationParams' }
+
+    CreateLandcoverDetectionJobRequest:
+      allOf:
+        - $ref: '#/components/schemas/CreateJobRequestBase'
+        - type: object
+          required: [service, model, input_dataset_ids, params]
+          additionalProperties: false
+          properties:
+            service: { type: string, const: landcover_detection }
+            model: { type: string, enum: [pandala] }
+            job_name: { type: string }
+            save_as_draft: { type: boolean }
+            input_dataset_ids: { $ref: '#/components/schemas/LandcoverDetectionInputs' }
+            params: { $ref: '#/components/schemas/LandcoverDetectionParams' }
+
+    CreateReconstruction3dJobRequest:
+      allOf:
+        - $ref: '#/components/schemas/CreateJobRequestBase'
+        - type: object
+          required: [service, model, input_dataset_ids, params]
+          additionalProperties: false
+          properties:
+            service: { type: string, const: reconstruction_3d }
+            model: { type: string, enum: [dream3d, cascade_mesh] }
+            job_name: { type: string }
+            save_as_draft: { type: boolean }
+            input_dataset_ids: { $ref: '#/components/schemas/Reconstruction3dInputs' }
+            params: { $ref: '#/components/schemas/Reconstruction3dParams' }
+
+    CreateConverterJobRequest:
+      allOf:
+        - $ref: '#/components/schemas/CreateJobRequestBase'
+        - type: object
+          required: [service, input_dataset_ids, params]
+          additionalProperties: false
+          properties:
+            service: { type: string, const: converter }
+            model: { type: 'null' }
+            job_name: { type: string }
+            save_as_draft: { type: boolean }
+            input_dataset_ids: { $ref: '#/components/schemas/ConverterInputs' }
+            params: { $ref: '#/components/schemas/ConverterParams' }
+
+    EstimateResponse:
+      type: object
+      required: [credits_estimated, estimated_output_bytes, breakdown]
+      additionalProperties: false
+      properties:
+        credits_estimated: { type: integer, minimum: 0 }
+        estimated_output_bytes: { type: integer, minimum: 0, format: int64 }
+        breakdown:
+          type: object
+          required: [line_items, total]
+          additionalProperties: false
+          properties:
+            line_items:
+              type: array
+              items:
+                type: object
+                required: [label, unit, quantity, unit_credits, subtotal]
+                additionalProperties: false
+                properties:
+                  label: { type: string }
+                  unit: { type: string }
+                  quantity: { type: number }
+                  unit_credits: { type: number }
+                  subtotal: { type: integer }
+            total: { type: integer }
+
+    UsageSummary:
+      type: object
+      required: [storage_used_bytes, storage_quota_bytes, credits_remaining, recent_transactions]
+      additionalProperties: false
+      properties:
+        storage_used_bytes: { type: integer, minimum: 0, format: int64 }
+        storage_quota_bytes: { type: integer, minimum: 0, format: int64 }
+        credits_remaining: { type: integer, minimum: 0 }
+        recent_transactions:
+          type: array
+          maxItems: 10
+          description: Last 10, newest first. Full history via GET /credits/transactions.
+          items: { $ref: '#/components/schemas/CreditTransaction' }
+
+    # ---------- internal service interface ----------
+    ResolvedDataset:
+      type: object
+      description: |
+        What the gateway sends a service in place of a bare UUID: the dataset metadata
+        plus a signed READ url. TTL MUST exceed max queue wait + max_job_duration, or a
+        long-queued job dies on an expired URL (CONTRACT-CHANGES D15).
+      required: [dataset_id, name, dataset_format, dataset_role, size_bytes, crs, bbox,
+                 signed_url, signed_url_expires_at]
+      additionalProperties: false
+      properties:
+        dataset_id: { type: string, format: uuid }
+        name: { type: string }
+        dataset_format: { $ref: '#/components/schemas/DatasetFormat' }
+        dataset_role:
+          oneOf: [{ $ref: '#/components/schemas/DatasetRole' }, { type: 'null' }]
+        size_bytes: { type: integer, minimum: 0, format: int64 }
+        crs: { $ref: '#/components/schemas/Crs' }
+        bbox:
+          oneOf: [{ $ref: '#/components/schemas/Bbox' }, { type: 'null' }]
+        signed_url: { type: string, description: 'Treat as a credential. Never log.' }
+        signed_url_expires_at: { $ref: '#/components/schemas/Timestamp' }
+
+    InternalJobRequest:
+      type: object
+      description: |
+        Gateway -> Service. `input_datasets` maps the SAME keys as the job's
+        input_dataset_ids, with UUIDs resolved to ResolvedDataset.
+      required: [job_id, service, model, input_datasets, params,
+                 output_prefix, output_upload_urls, callback_url, max_job_duration_seconds,
+                 heartbeat_interval_seconds]
+      additionalProperties: false
+      properties:
+        job_id: { type: string, format: uuid }
+        service: { $ref: '#/components/schemas/ServiceName' }
+        model:
+          oneOf: [{ type: string }, { type: 'null' }]
+        input_datasets:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/ResolvedDataset' }
+        params:
+          oneOf:
+            - $ref: '#/components/schemas/BuildingExtractionParams'
+            - $ref: '#/components/schemas/PointCloudClassificationParams'
+            - $ref: '#/components/schemas/LandcoverDetectionParams'
+            - $ref: '#/components/schemas/Reconstruction3dParams'
+            - $ref: '#/components/schemas/ConverterParams'
+        output_prefix:
+          type: string
+          description: |
+            Storage prefix the service MUST write under. The PDF specified signed READ
+            urls for inputs but never said how a service writes its OUTPUT bytes at all
+            (CONTRACT-CHANGES A3).
+        output_upload_urls:
+          type: array
+          description: Presigned PUT, one per requested output format.
+          items:
+            type: object
+            required: [output_format, storage_key, url, expires_at]
+            additionalProperties: false
+            properties:
+              output_format: { $ref: '#/components/schemas/DatasetFormat' }
+              storage_key: { type: string }
+              url: { type: string }
+              expires_at: { $ref: '#/components/schemas/Timestamp' }
+        callback_url: { type: string }
+        max_job_duration_seconds:
+          type: integer
+          minimum: 1
+          description: |
+            After this, the gateway's reaper marks the job failed/JOB_TIMEOUT and
+            refunds. Without it a crashed worker strands a paid job forever
+            (CONTRACT-CHANGES B4).
+        heartbeat_interval_seconds:
+          type: integer
+          minimum: 1
+          description: |
+            The service MUST emit a processing callback at least this often while
+            working (see docs/job-lifecycle.md). Lets the reaper distinguish a slow
+            job from a dead worker long before max_job_duration_seconds expires.
+
+    InternalJobAccepted:
+      type: object
+      required: [accepted, job_id, credits_estimated]
+      additionalProperties: false
+      properties:
+        accepted: { type: boolean, const: true }
+        job_id: { type: string, format: uuid }
+        credits_estimated: { type: integer, minimum: 0 }
+
+    InternalJobStatus:
+      type: object
+      required: [job_id, status, progress_percent]
+      additionalProperties: false
+      properties:
+        job_id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/ServiceReportedStatus' }
+        progress_percent: { type: integer, minimum: 0, maximum: 100 }
+
+    InternalEstimateRequest:
+      type: object
+      required: [input_datasets, params]
+      additionalProperties: false
+      properties:
+        input_datasets:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/ResolvedDataset' }
+        params:
+          oneOf:
+            - $ref: '#/components/schemas/BuildingExtractionParams'
+            - $ref: '#/components/schemas/PointCloudClassificationParams'
+            - $ref: '#/components/schemas/LandcoverDetectionParams'
+            - $ref: '#/components/schemas/Reconstruction3dParams'
+            - $ref: '#/components/schemas/ConverterParams'
+
+    ServiceCapabilities:
+      type: object
+      description: |
+        Lets the gateway/UI discover what a service supports instead of hardcoding it.
+        For the converter this carries the source->target conversion matrix, so the UI
+        never offers an impossible conversion the user would be billed for.
+      required: [service, version, contract_version, models, output_formats, max_input_size_bytes]
+      additionalProperties: false
+      properties:
+        service: { $ref: '#/components/schemas/ServiceName' }
+        version: { type: string }
+        contract_version: { type: string }
+        models:
+          type: array
+          items: { type: string }
+        output_formats:
+          type: array
+          items: { $ref: '#/components/schemas/DatasetFormat' }
+        max_input_size_bytes: { type: integer, format: int64 }
+        conversion_matrix:
+          type: object
+          description: converter only. source dataset_format -> allowed target formats.
+          additionalProperties:
+            type: array
+            items: { $ref: '#/components/schemas/DatasetFormat' }
+
+    HealthResponse:
+      type: object
+      required: [status]
+      additionalProperties: false
+      properties:
+        status: { type: string, enum: [ok, degraded, error] }
+        detail:
+          oneOf: [{ type: object }, { type: 'null' }]
+
+  responses:
+    BadRequest:
+      description: Validation failed.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Unauthorized:
+      description: Missing or invalid credentials.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Forbidden:
+      description: Authenticated but not permitted.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NotFound:
+      description: |
+        Not found, OR found but owned by another user — cross-owner access returns 404
+        rather than 403 to prevent ID enumeration (CONTRACT-CHANGES C2).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Conflict:
+      description: State conflict (duplicate job, illegal transition, dataset in use).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    PaymentRequired:
+      description: Insufficient credits.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    UnprocessableEntity:
+      description: Semantically invalid (bad model/dataset combination, missing input, CRS mismatch).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    UnexpectedError:
+      description: |
+        Any status not otherwise documented — including 500 INTERNAL_ERROR. Every
+        operation carries this as `default` so clients always have a typed error body
+        to fall back on instead of parsing ad-hoc text.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    TooManyRequests:
+      description: Rate limited. Carries Retry-After and X-RateLimit-* headers.
+      headers:
+        Retry-After: { schema: { type: integer } }
+        X-RateLimit-Limit: { schema: { type: integer } }
+        X-RateLimit-Remaining: { schema: { type: integer } }
+        X-RateLimit-Reset: { schema: { type: integer } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+security:
+  - accessToken: []
+
+paths:
+  # ==================== AUTH ====================
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: Register a new user
+      security: []
+      parameters: [{ $ref: '#/components/parameters/RequestId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '201':
+          description: |
+            Created. Sets the refresh token as an HttpOnly; Secure; SameSite=Strict;
+            Path=/v1/auth; Max-Age=2592000 cookie. It is never in the response body.
+          headers:
+            Set-Cookie: { schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: object
+                    required: [user, organization, session]
+                    additionalProperties: false
+                    properties:
+                      user: { $ref: '#/components/schemas/User' }
+                      organization:
+                        allOf: [{ $ref: '#/components/schemas/Organization' }]
+                        description: The personal organization created for this user.
+                      session: { $ref: '#/components/schemas/Session' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Log in
+      security: []
+      parameters: [{ $ref: '#/components/parameters/RequestId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: Authenticated. Refresh token set as an HttpOnly cookie.
+          headers:
+            Set-Cookie: { schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: object
+                    required: [user, session]
+                    additionalProperties: false
+                    properties:
+                      user: { $ref: '#/components/schemas/User' }
+                      session: { $ref: '#/components/schemas/Session' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Exchange the refresh cookie for a new access token
+      description: |
+        Takes NO body. The refresh token is read from the HttpOnly cookie — the PDF
+        asked for it in the body, which JS cannot do for an HttpOnly cookie
+        (CONTRACT-CHANGES C1). Rotates the refresh token; reuse of a rotated token
+        revokes the whole family.
+      security: []
+      parameters: [{ $ref: '#/components/parameters/RequestId' }]
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: New session.
+          headers:
+            Set-Cookie: { schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: object
+                    required: [session]
+                    additionalProperties: false
+                    properties:
+                      session: { $ref: '#/components/schemas/Session' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Log out
+      description: |
+        Revokes the refresh token for the current session (or all sessions when
+        all_devices=true) and clears the cookie. Already-issued access tokens remain
+        valid until they expire — stated explicitly because JWTs are stateless.
+      parameters: [{ $ref: '#/components/parameters/RequestId' }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LogoutRequest' }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '204': { description: Logged out. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /sessions:
+    get:
+      tags: [auth]
+      summary: List active sessions
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: Sessions for the current user.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Session' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /sessions/{session_id}:
+    delete:
+      tags: [auth]
+      summary: Revoke a session
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '204': { description: Revoked. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ==================== USERS ====================
+  /users/me:
+    get:
+      tags: [users]
+      summary: Current user
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: object
+                    required: [user]
+                    additionalProperties: false
+                    properties:
+                      user: { $ref: '#/components/schemas/User' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    patch:
+      tags: [users]
+      summary: Update current user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateUserRequest' }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: object
+                    required: [user]
+                    additionalProperties: false
+                    properties:
+                      user: { $ref: '#/components/schemas/User' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /users/me/usage:
+    get:
+      tags: [users]
+      summary: Storage and credit usage
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data: { $ref: '#/components/schemas/UsageSummary' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /organizations/me:
+    get:
+      tags: [users]
+      summary: The caller's organization
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: object
+                    required: [organization]
+                    additionalProperties: false
+                    properties:
+                      organization: { $ref: '#/components/schemas/Organization' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    patch:
+      tags: [users]
+      summary: Rename the organization
+      description: |
+        `enterprise_admin` only. A personal organization cannot be renamed (409) — it
+        exists to give every user an org scope, not to be managed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateOrganizationRequest' }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: object
+                    required: [organization]
+                    additionalProperties: false
+                    properties:
+                      organization: { $ref: '#/components/schemas/Organization' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /organizations/me/members:
+    get:
+      tags: [users]
+      summary: List organization members
+      description: '`enterprise_admin` only. A personal org always returns exactly one member.'
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/User' }
+                  meta: { $ref: '#/components/schemas/PageMeta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /credits/transactions:
+    get:
+      tags: [users]
+      summary: Credit transaction history
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
+        - name: type
+          in: query
+          schema: { $ref: '#/components/schemas/CreditTransactionType' }
+        - name: from
+          in: query
+          schema: { $ref: '#/components/schemas/Timestamp' }
+        - name: to
+          in: query
+          schema: { $ref: '#/components/schemas/Timestamp' }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/CreditTransaction' }
+                  meta: { $ref: '#/components/schemas/PageMeta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ==================== DATASETS ====================
+  /datasets:
+    get:
+      tags: [datasets]
+      summary: List datasets
+      description: 'Owner-scoped. Stable sort: created_at DESC, dataset_id DESC.'
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
+        - name: search
+          in: query
+          description: Case-insensitive substring match on name.
+          schema: { type: string }
+        - name: dataset_format
+          in: query
+          description: Repeat the key for multiple values.
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/DatasetFormat' }
+        - name: dataset_role
+          in: query
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/DatasetRole' }
+        - name: source
+          in: query
+          schema: { $ref: '#/components/schemas/DatasetSource' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/DatasetStatus' }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Dataset' }
+                  meta: { $ref: '#/components/schemas/PageMeta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+    post:
+      tags: [datasets]
+      summary: Upload a small dataset directly (<= 100 MB)
+      description: |
+        Simple path for small files only. Anything larger MUST use the presigned flow
+        at /datasets/uploads — a single multipart POST cannot carry a multi-GB LAS file.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, name, dataset_format]
+              properties:
+                file: { type: string, format: binary }
+                name: { type: string }
+                dataset_format: { $ref: '#/components/schemas/DatasetFormat' }
+                dataset_role: { $ref: '#/components/schemas/DatasetRole' }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '202':
+          description: Accepted; dataset returns with status=processing while validating.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: object
+                    required: [dataset]
+                    additionalProperties: false
+                    properties:
+                      dataset: { $ref: '#/components/schemas/Dataset' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Storage quota exceeded (STORAGE_QUOTA_EXCEEDED).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '413':
+          description: File exceeds the direct-upload limit; use /datasets/uploads.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /datasets/uploads:
+    post:
+      tags: [datasets]
+      summary: Begin a presigned direct-to-storage upload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateUploadRequest' }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '201':
+          description: Upload URLs issued.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data: { $ref: '#/components/schemas/CreateUploadResponse' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Storage quota would be exceeded — checked BEFORE issuing URLs.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /datasets/uploads/{upload_id}/complete:
+    post:
+      tags: [datasets]
+      summary: Finalize a presigned upload
+      parameters:
+        - name: upload_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CompleteUploadRequest' }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '202':
+          description: Assembled; validation begins (status=processing).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: object
+                    required: [dataset]
+                    additionalProperties: false
+                    properties:
+                      dataset: { $ref: '#/components/schemas/Dataset' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /datasets/{dataset_id}:
+    parameters:
+      - name: dataset_id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [datasets]
+      summary: Get a dataset
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: object
+                    required: [dataset]
+                    additionalProperties: false
+                    properties:
+                      dataset: { $ref: '#/components/schemas/Dataset' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [datasets]
+      summary: Rename a dataset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              additionalProperties: false
+              properties:
+                name: { type: string, minLength: 1, maxLength: 255 }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: object
+                    required: [dataset]
+                    additionalProperties: false
+                    properties:
+                      dataset: { $ref: '#/components/schemas/Dataset' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [datasets]
+      summary: Delete a dataset
+      description: |
+        Soft delete — job history keeps referencing it. 409 DATASET_IN_USE if any
+        non-terminal job references it. Quota is decremented immediately; the object
+        is purged by async GC after a retention window.
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /datasets/{dataset_id}/download:
+    get:
+      tags: [datasets]
+      summary: Download a dataset
+      description: |
+        302 to a short-lived signed URL for the dataset AS STORED. The PDF's `?format=`
+        query is intentionally absent: on-the-fly conversion would duplicate the
+        Converter service and bypass its billing (CONTRACT-CHANGES D13). Convert via a
+        converter job instead. The redirect MUST NOT be cached.
+      parameters:
+        - name: dataset_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '302':
+          description: Redirect to a signed storage URL.
+          headers:
+            Location: { schema: { type: string } }
+            Cache-Control: { schema: { type: string, examples: ['no-store'] } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Dataset is not status=ready.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  # ==================== JOBS ====================
+  /jobs:
+    get:
+      tags: [jobs]
+      summary: List jobs
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
+        - name: service
+          in: query
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/ServiceName' }
+        - name: status
+          in: query
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/JobStatus' }
+        - name: job_ids
+          in: query
+          description: Bulk fetch so a dashboard polls once, not once per job.
+          schema:
+            type: array
+            items: { type: string, format: uuid }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Job' }
+                  meta: { $ref: '#/components/schemas/PageMeta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [jobs]
+      summary: Create a job (draft by default)
+      description: |
+        With save_as_draft=false the job is queued AND credits are debited immediately,
+        so this can return 402. Validates the full per-service shape, including 3D
+        Reconstruction's elevation_source -> required-inputs rule.
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/RequestId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateJobRequest' }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: object
+                    required: [job]
+                    additionalProperties: false
+                    properties:
+                      job: { $ref: '#/components/schemas/Job' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /jobs/{job_id}:
+    parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [jobs]
+      summary: Get a job
+      description: Supports ETag / If-None-Match so progress polling is cheap.
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: OK
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: object
+                    required: [job]
+                    additionalProperties: false
+                    properties:
+                      job: { $ref: '#/components/schemas/Job' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '304': { description: Not modified. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [jobs]
+      summary: Edit a draft job
+      description: |
+        Drafts only (409 otherwise). `params` is REPLACED wholesale, never deep-merged.
+        Re-runs full cross-field validation and recomputes credits_estimated.
+        `service` is immutable. Supports If-Match for optimistic concurrency.
+      parameters:
+        - name: If-Match
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateJobRequest' }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: object
+                    required: [job]
+                    additionalProperties: false
+                    properties:
+                      job: { $ref: '#/components/schemas/Job' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { description: Precondition failed (concurrent edit). }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+    delete:
+      tags: [jobs]
+      summary: Delete a draft job
+      description: Drafts only; 409 JOB_NOT_DELETABLE otherwise.
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /jobs/{job_id}/estimate:
+    post:
+      tags: [jobs]
+      summary: Estimate credits
+      description: |
+        Proxies the owning service's /estimate so pricing lives in exactly one place —
+        the PDF returned credits_estimated from three places with no authority, inviting
+        duplicate pricing logic in TypeScript and Python (CONTRACT-CHANGES D9).
+        Persists credits_estimated on the job, which is why this is a POST.
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data: { $ref: '#/components/schemas/EstimateResponse' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /jobs/{job_id}/submit:
+    post:
+      tags: [jobs]
+      summary: Submit a draft job
+      description: |
+        draft -> queued, debits credits. Credits are debited only after the service
+        returns 202; if the service is unreachable the job stays queued and is retried,
+        so a user is never charged for a job that was never accepted.
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: Queued.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: object
+                    required: [job]
+                    additionalProperties: false
+                    properties:
+                      job: { $ref: '#/components/schemas/Job' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /jobs/{job_id}/cancel:
+    post:
+      tags: [jobs]
+      summary: Cancel a job
+      description: |
+        Legal from queued or processing. The gateway calls DELETE on the owning
+        service so a running worker actually stops — the PDF had no service-side cancel
+        at all, so a cancelled job kept burning GPU (CONTRACT-CHANGES B2).
+        Refund policy is in the state-machine doc.
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: Cancelled.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: object
+                    required: [job]
+                    additionalProperties: false
+                    properties:
+                      job: { $ref: '#/components/schemas/Job' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /jobs/{job_id}/retry:
+    post:
+      tags: [jobs]
+      summary: Retry a failed job
+      description: Clones a failed/cancelled job into a new draft. Never mutates history.
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '201':
+          description: New draft created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: object
+                    required: [job]
+                    additionalProperties: false
+                    properties:
+                      job: { $ref: '#/components/schemas/Job' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /jobs/{job_id}/events:
+    get:
+      tags: [jobs]
+      summary: Server-sent events for job progress
+      description: |
+        SSE stream of job.progress / job.status_changed. Removes the need to poll —
+        the PDF implied polling with no stated interval, colliding with an undefined
+        429 (CONTRACT-CHANGES D16).
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: text/event-stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /jobs/{job_id}/logs:
+    get:
+      tags: [jobs]
+      summary: Job logs
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: since
+          in: query
+          schema: { $ref: '#/components/schemas/Timestamp' }
+        - name: level
+          in: query
+          schema: { type: string, enum: [debug, info, warning, error] }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [timestamp, level, message]
+                      additionalProperties: false
+                      properties:
+                        timestamp: { $ref: '#/components/schemas/Timestamp' }
+                        level: { type: string, enum: [debug, info, warning, error] }
+                        message: { type: string }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ==================== NOTIFICATIONS ====================
+  /notifications:
+    get:
+      tags: [notifications]
+      summary: List notifications
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
+        - name: read
+          in: query
+          schema: { type: boolean }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: OK. meta carries unread_count for the bell badge.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Notification' }
+                  meta:
+                    # PageMeta + unread_count, restated because PageMeta is closed
+                    # and cannot be allOf-extended (see PageMeta's description).
+                    type: object
+                    required: [request_id, timestamp, total, page, page_size, total_pages, unread_count]
+                    additionalProperties: false
+                    properties:
+                      request_id: { type: string }
+                      timestamp: { $ref: '#/components/schemas/Timestamp' }
+                      total: { type: integer, minimum: 0 }
+                      page: { type: integer, minimum: 1 }
+                      page_size: { type: integer, minimum: 1 }
+                      total_pages: { type: integer, minimum: 0 }
+                      unread_count: { type: integer, minimum: 0 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /notifications/read-all:
+    post:
+      tags: [notifications]
+      summary: Mark all notifications read
+      description: Avoids N HTTP calls to clear N notifications.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                before: { $ref: '#/components/schemas/Timestamp' }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: object
+                    required: [updated_count]
+                    additionalProperties: false
+                    properties:
+                      updated_count: { type: integer, minimum: 0 }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /notifications/{notification_id}:
+    parameters:
+      - name: notification_id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      tags: [notifications]
+      summary: Mark a notification read or unread
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [read]
+              additionalProperties: false
+              properties:
+                read: { type: boolean }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                additionalProperties: false
+                properties:
+                  data:
+                    type: object
+                    required: [notification]
+                    additionalProperties: false
+                    properties:
+                      notification: { $ref: '#/components/schemas/Notification' }
+                  meta: { $ref: '#/components/schemas/Meta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [notifications]
+      summary: Delete a notification
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ==================== INTERNAL: gateway -> service ====================
+  # Every AI/utility service MUST implement these five operations identically.
+  # {service} is the shared ServicePathSegment parameter (the path_segment from
+  # services.yaml), so the segment enum lives in exactly one place.
+  /internal/{service}/jobs:
+    post:
+      tags: [internal]
+      summary: Submit a job to a service
+      security: [{ internalServiceToken: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ServicePathSegment' }
+        - { $ref: '#/components/parameters/RequestId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InternalJobRequest' }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '202':
+          description: Accepted and queued for processing.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InternalJobAccepted' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: A job with this job_id was already accepted (idempotent replay).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /internal/{service}/jobs/{job_id}:
+    delete:
+      tags: [internal]
+      summary: Cancel a running job
+      description: |
+        Best-effort. The service SHOULD stop work and MUST NOT send further callbacks
+        for this job. Without this the gateway can only flip its own DB row while the
+        worker keeps burning GPU (CONTRACT-CHANGES B2).
+      security: [{ internalServiceToken: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ServicePathSegment' }
+        - name: job_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '202': { description: Cancellation accepted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /internal/{service}/jobs/{job_id}/status:
+    get:
+      tags: [internal]
+      summary: Poll job status
+      description: Used by the gateway's reaper to detect dead workers.
+      security: [{ internalServiceToken: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ServicePathSegment' }
+        - name: job_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InternalJobStatus' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /internal/{service}/estimate:
+    post:
+      tags: [internal]
+      summary: Estimate credits for a prospective job
+      description: The single source of pricing truth for this service.
+      security: [{ internalServiceToken: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ServicePathSegment' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InternalEstimateRequest' }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EstimateResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /internal/{service}/capabilities:
+    get:
+      tags: [internal]
+      summary: Service capabilities
+      security: [{ internalServiceToken: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ServicePathSegment' }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceCapabilities' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ==================== INTERNAL: service -> gateway ====================
+  /internal/jobs/{job_id}/callback:
+    post:
+      tags: [internal]
+      summary: Job progress/completion callback
+      description: |
+        Implemented BY THE GATEWAY, called BY SERVICES. The gateway MUST verify the
+        calling service matches job.service before accepting.
+      security: [{ internalServiceToken: [] }]
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/RequestId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/JobCallback' }
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: |
+            Acknowledged. Any non-200 means the service MUST retry with backoff.
+            Stale/duplicate callbacks also return 200 (they are intentionally dropped),
+            so a service never retries forever on an already-handled event.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JobCallbackAck' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Calling service does not own this job.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ==================== HEALTH (every service AND the gateway) ====================
+  /health:
+    get:
+      tags: [internal]
+      summary: Liveness
+      security: []
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: Process is alive.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthResponse' }
+
+  /ready:
+    get:
+      tags: [internal]
+      summary: Readiness
+      description: Dependencies reachable — storage, DB/queue, model weights loaded, GPU present.
+      security: []
+      responses:
+        default: { $ref: '#/components/responses/UnexpectedError' }
+        '200':
+          description: Ready to accept work.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthResponse' }
+        '503':
+          description: Not ready.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthResponse' }

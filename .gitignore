@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Env & secrets — never commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*-service-account*.json
+credentials*.json
+
+# Geo/ML data: these are GB-scale and must never enter git history
+*.las
+*.laz
+*.tif
+*.tiff
+*.geotiff
+*.zip
+*.xlsx
+*.pt
+*.pth
+*.onnx
+*.ckpt
+data/
+models/weights/
+outputs/
+
+# OS / editor
+.DS_Store
+.idea/
+*.swp

@@ -1,0 +1,69 @@
+[project]
+name = "naraga-3d-reconstruction"
+version = "0.1.0"
+description = "NARAGA 3D Reconstruction service"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "httpx>=0.27",
+    "email-validator>=2.2",
+]
+
+[project.optional-dependencies]
+# Heavy geo/ML wheels live here so `uv sync` stays fast for anyone touching only the
+# API layer. Install with: uv sync --extra geo
+geo = [
+    "torch>=2.5",
+    "open3d>=0.18",
+    "trimesh>=4.5",
+    "laspy[laszip]>=2.5",
+    "rasterio>=1.4",
+    "pyproj>=3.7",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    # tests cross-check baked capabilities constants against the vendored registry
+    "pyyaml>=6.0",
+    "types-pyyaml>=6.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/reconstruction_3d"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+extend-exclude = ["src/reconstruction_3d/contract/models.py"]  # generated
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
+exclude = ["src/reconstruction_3d/contract/models.py"]
+
+[[tool.mypy.overrides]]
+module = ["reconstruction_3d.contract.models"]
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+# Geo/ML libs ship no type stubs.
+module = ["osgeo.*", "pdal.*", "laspy.*", "open3d.*", "rasterio.*", "torch.*", "geopandas.*", "shapely.*", "pyproj.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,52 @@
+# Canonical service registry.
+# NEVER derive one column from another in code — landcover_detection and
+# reconstruction_3d both break a naive string transform (see CONTRACT-CHANGES.md D8).
+version: 1
+services:
+  building_extraction:
+    path_segment: building-extraction
+    internal_host: naraga-building-extraction
+    port: 8081
+    repo: naraga-building-extraction
+    python_package: building_extraction
+    models: [cascade_building, geocarta]
+    output_formats: [geojson, pmtiles]
+  pointcloud_classification:
+    path_segment: pointcloud-classification
+    internal_host: naraga-pointcloud-classification
+    port: 8082
+    repo: naraga-pointcloud-classification
+    python_package: pointcloud_classification
+    models: [csf, dgcnn]
+    output_formats: [las, laz, 3dtiles, geotiff]
+  landcover_detection:
+    path_segment: landcover-detection
+    internal_host: naraga-land-cover-detection   # NOTE: repo has an extra word boundary
+    port: 8083
+    repo: naraga-land-cover-detection
+    python_package: landcover_detection
+    models: [pandala]
+    output_formats: [geojson, pmtiles]
+  reconstruction_3d:
+    path_segment: reconstruction-3d
+    internal_host: naraga-3d-reconstruction      # NOTE: repo reorders the words
+    port: 8084
+    repo: naraga-3d-reconstruction
+    python_package: reconstruction_3d   # NOT 3d_reconstruction — cannot start with a digit
+    models: [dream3d, cascade_mesh]
+    output_formats: [gltf, 3dtiles]
+  converter:
+    path_segment: converter
+    internal_host: naraga-converter
+    port: 8085
+    repo: naraga-converter
+    python_package: converter
+    models: []          # converter has no model; Job.model is null (CONTRACT-CHANGES A7)
+    output_formats: [3dtiles, pmtiles, geojson, cog, las, laz, gltf]
+
+gateway:
+  internal_host: naraga-gateway
+  port: 8080
+frontend:
+  internal_host: naraga-fe
+  port: 3000

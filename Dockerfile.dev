@@ -1,0 +1,31 @@
+# syntax=docker/dockerfile:1.7
+# Dev image. GDAL and PDAL come from conda-forge as prebuilt binaries — the PyPI
+# `pdal` wheel is only a binding and needs the C++ library present, which is why
+# pip alone cannot install it.
+FROM mambaorg/micromamba:1.5.10-noble
+
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+ && rm -rf /var/lib/apt/lists/*
+USER $MAMBA_USER
+
+WORKDIR /app
+
+# Native geo stack first: this layer is large and rarely changes.
+RUN micromamba install -y -n base -c conda-forge \
+      python=3.12 gdal=3.9 pdal=2.8 python-pdal laspy \
+ && micromamba clean --all --yes
+
+# src/ is bind-mounted over this at runtime; installing it here just resolves the
+# dependencies from pyproject. PYTHONPATH makes the mounted code importable.
+COPY --chown=$MAMBA_USER:$MAMBA_USER pyproject.toml ./
+COPY --chown=$MAMBA_USER:$MAMBA_USER src ./src
+RUN micromamba run -n base python -m pip install --no-cache-dir -e .
+
+# Durable job state (SQLite) lives here; compose mounts a volume over it.
+RUN mkdir -p /app/data
+
+ENV PATH=/opt/conda/bin:$PATH PYTHONPATH=/app/src
+EXPOSE 8084
+CMD ["micromamba", "run", "-n", "base", "uvicorn", "reconstruction_3d.main:app", \
+     "--host", "0.0.0.0", "--port", "8084", "--reload", "--reload-dir", "/app/src"]

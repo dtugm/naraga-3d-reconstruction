@@ -1,0 +1,69 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.5.11"
+          enable-cache: true
+
+      - run: uv sync --frozen
+
+      # No --fix in CI: the job must FAIL on a violation, not rewrite files.
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Typecheck
+        run: uv run mypy
+
+      - name: Test
+        run: uv run pytest
+
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.5.11"
+
+      # Regenerate from the VENDORED spec and require a byte-identical result.
+      # Catches a hand-edit to either the spec or the generated models. The canonical
+      # spec lives in dtugm/naraga-contract; changes arrive here as a sync PR.
+      - name: Verify generated models match the vendored contract
+        run: |
+          # Version pin + header must be byte-identical to what the canonical
+          # generator (scripts/generate.sh in dtugm/naraga-contract) produces.
+          source contract/toolchain.env
+          OUT=src/reconstruction_3d/contract/models.py
+          cp "$OUT" /tmp/committed.py
+          uv run --quiet --with "datamodel-code-generator[http]==${DATAMODEL_CODE_GENERATOR_VERSION}" datamodel-codegen \
+            --input contract/openapi.yaml --input-file-type openapi --output /tmp/regen.py \
+            --output-model-type pydantic_v2.BaseModel --target-python-version 3.12 \
+            --use-standard-collections --use-union-operator --enum-field-as-literal one \
+            --use-schema-description --field-constraints --snake-case-field \
+            --disable-timestamp
+          {
+            echo '# GENERATED FROM contract/openapi.yaml — DO NOT EDIT.'
+            echo "# Regenerate with datamodel-code-generator==${DATAMODEL_CODE_GENERATOR_VERSION} (full flags: scripts/generate.sh in dtugm/naraga-contract)"
+            echo '# ruff: noqa'
+            cat /tmp/regen.py
+          } > "$OUT"
+          if ! diff -q /tmp/committed.py "$OUT" >/dev/null; then
+            echo "::error::$OUT does not match contract/openapi.yaml."
+            echo "Do not hand-edit either file — open a PR against dtugm/naraga-contract instead."
+            diff -u /tmp/committed.py "$OUT" | head -50
+            exit 1
+          fi
+          echo "generated models match the vendored contract"

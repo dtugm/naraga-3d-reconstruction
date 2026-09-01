@@ -1,0 +1,27 @@
+# Standalone dev stack for this service.
+#   cp .env.example .env && docker compose up
+services:
+  reconstruction-3d:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "127.0.0.1:8084:8084"
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./src:/app/src:ro
+      # Durable job state: survives container restarts, so the callback outbox
+      # and job idempotency behave like production.
+      - state:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8084/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  state:
