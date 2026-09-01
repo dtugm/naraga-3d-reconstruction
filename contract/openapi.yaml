@@ -1,15 +1,13 @@
 openapi: 3.1.0
 info:
   title: NARAGA API
-  version: 1.0.0
-  x-contract-version: 1.0.0
+  version: 1.0.1
+  x-contract-version: 1.0.1
   description: |
     Canonical, machine-readable contract for NARAGA — AI-powered geospatial processing.
 
     THIS FILE IS THE SINGLE SOURCE OF TRUTH. TypeScript types and Pydantic models are
     generated from it; do not hand-edit generated output. CI fails on drift.
-
-    Deviations from "NARAGA API Contract.pdf" are enumerated in CONTRACT-CHANGES.md.
 
     Conventions
     - Every field is snake_case and identical across the Gateway and all services.
@@ -22,8 +20,6 @@ info:
       schema unsatisfiable in draft 2020-12, because each arm validates in isolation
       and rejects the other arm's properties.
 servers:
-  - url: https://api.naraga.id/v1
-    description: Public gateway (frontend-facing)
   - url: http://localhost:8080/v1
     description: Local gateway
 
@@ -83,7 +79,18 @@ components:
         The path_segment from services.yaml — NEVER derived by string transform
         (landcover_detection and reconstruction_3d both break a naive one). Kebab-case;
         distinct from the snake_case ServiceName enum used in payloads.
-      schema: { type: string, enum: [building-extraction, pointcloud-classification, landcover-detection, reconstruction-3d, converter] }
+      schema:
+        {
+          type: string,
+          enum:
+            [
+              building-extraction,
+              pointcloud-classification,
+              landcover-detection,
+              reconstruction-3d,
+              converter,
+            ],
+        }
 
   schemas:
     # ---------- primitives ----------
@@ -97,7 +104,7 @@ components:
         values are rejected. Consumers MUST accept any valid RFC3339 instant.
         (No regex `pattern` here on purpose: with format=date-time, generators emit a
         real datetime type and a string pattern cannot be applied to it.)
-      examples: ['2026-09-01T03:00:00.000Z']
+      examples: ["2026-09-01T03:00:00.000Z"]
 
     Bbox:
       type: array
@@ -116,14 +123,23 @@ components:
 
     Crs:
       type: string
-      description: Authority:code form only. Not WKT, not a bare integer.
-      pattern: '^EPSG:[0-9]{4,6}$'
-      examples: ['EPSG:4326', 'EPSG:32749']
+      description: |
+        Authority:code form only. Not WKT, not a bare integer.
+        Case-sensitive: 'EPSG', never 'epsg' (the pattern already enforces this).
+      pattern: "^EPSG:[0-9]{4,6}$"
+      examples: ["EPSG:4326", "EPSG:32749"]
 
     # ---------- enums ----------
     ServiceName:
       type: string
-      enum: [building_extraction, pointcloud_classification, landcover_detection, reconstruction_3d, converter]
+      enum:
+        [
+          building_extraction,
+          pointcloud_classification,
+          landcover_detection,
+          reconstruction_3d,
+          converter,
+        ]
 
     JobStatus:
       type: string
@@ -139,14 +155,40 @@ components:
     DatasetFormat:
       type: string
       description: Container/encoding. Orthogonal to DatasetRole — a DTM *is* a GeoTIFF.
-      enum: [geotiff, cog, las, laz, geojson, pmtiles, 3dtiles, gltf, gml, shp, obj, xyz, ply]
+      enum:
+        [
+          geotiff,
+          cog,
+          las,
+          laz,
+          geojson,
+          pmtiles,
+          3dtiles,
+          gltf,
+          gml,
+          shp,
+          obj,
+          xyz,
+          ply,
+        ]
 
     DatasetRole:
       type: string
       description: |
         Semantic meaning, independent of container. Splitting this out is what makes the
         classify -> reconstruct pipeline expressible (see CONTRACT-CHANGES.md A1).
-      enum: [orthophoto, dem, dtm, dsm, point_cloud, building_outline, landcover, mesh, aoi]
+      enum:
+        [
+          orthophoto,
+          dem,
+          dtm,
+          dsm,
+          point_cloud,
+          building_outline,
+          landcover,
+          mesh,
+          aoi,
+        ]
 
     DatasetSource:
       type: string
@@ -166,7 +208,15 @@ components:
 
     NotificationType:
       type: string
-      enum: [job_complete, job_failed, dataset_ready, dataset_failed, credit_low, system]
+      enum:
+        [
+          job_complete,
+          job_failed,
+          dataset_ready,
+          dataset_failed,
+          credit_low,
+          system,
+        ]
 
     ErrorCode:
       type: string
@@ -198,7 +248,7 @@ components:
       additionalProperties: false
       properties:
         request_id: { type: string }
-        timestamp: { $ref: '#/components/schemas/Timestamp' }
+        timestamp: { $ref: "#/components/schemas/Timestamp" }
 
     PageMeta:
       type: object
@@ -210,7 +260,7 @@ components:
       additionalProperties: false
       properties:
         request_id: { type: string }
-        timestamp: { $ref: '#/components/schemas/Timestamp' }
+        timestamp: { $ref: "#/components/schemas/Timestamp" }
         total: { type: integer, minimum: 0 }
         page: { type: integer, minimum: 1 }
         page_size: { type: integer, minimum: 1 }
@@ -226,11 +276,11 @@ components:
           required: [code, message, details]
           additionalProperties: false
           properties:
-            code: { $ref: '#/components/schemas/ErrorCode' }
+            code: { $ref: "#/components/schemas/ErrorCode" }
             message: { type: string }
             details:
-              oneOf: [{ type: object }, { type: 'null' }]
-        meta: { $ref: '#/components/schemas/Meta' }
+              oneOf: [{ type: object }, { type: "null" }]
+        meta: { $ref: "#/components/schemas/Meta" }
 
     # ---------- entities ----------
     Organization:
@@ -242,7 +292,8 @@ components:
 
         This replaces the PDF's free-text `User.organization` (CONTRACT-CHANGES C3):
         string equality would have leaked data between two companies both typing "Acme".
-      required: [organization_id, name, is_personal, owner_id, created_at, updated_at]
+      required:
+        [organization_id, name, is_personal, owner_id, created_at, updated_at]
       additionalProperties: false
       properties:
         organization_id: { type: string, format: uuid }
@@ -251,13 +302,24 @@ components:
           type: boolean
           description: Auto-created single-member org. Cannot be renamed or have members added.
         owner_id: { type: string, format: uuid }
-        created_at: { $ref: '#/components/schemas/Timestamp' }
-        updated_at: { $ref: '#/components/schemas/Timestamp' }
+        created_at: { $ref: "#/components/schemas/Timestamp" }
+        updated_at: { $ref: "#/components/schemas/Timestamp" }
 
     User:
       type: object
-      required: [id, email, name, organization_id, role, credits_remaining,
-                 storage_used_bytes, storage_quota_bytes, created_at, updated_at]
+      required:
+        [
+          id,
+          email,
+          name,
+          organization_id,
+          role,
+          credits_remaining,
+          storage_used_bytes,
+          storage_quota_bytes,
+          created_at,
+          updated_at,
+        ]
       additionalProperties: false
       properties:
         id: { type: string, format: uuid }
@@ -267,12 +329,13 @@ components:
           type: string
           format: uuid
           description: Never null — a personal org is created at registration.
-        role: { $ref: '#/components/schemas/UserRole' }
+        role: { $ref: "#/components/schemas/UserRole" }
         credits_remaining: { type: integer, minimum: 0 }
         storage_used_bytes: { type: integer, minimum: 0, format: int64 }
-        storage_quota_bytes: { type: integer, minimum: 0, format: int64, default: 5368709120 }
-        created_at: { $ref: '#/components/schemas/Timestamp' }
-        updated_at: { $ref: '#/components/schemas/Timestamp' }
+        storage_quota_bytes:
+          { type: integer, minimum: 0, format: int64, default: 5368709120 }
+        created_at: { $ref: "#/components/schemas/Timestamp" }
+        updated_at: { $ref: "#/components/schemas/Timestamp" }
       # `api_token` is intentionally absent (CONTRACT-CHANGES C4): dropped for v1.
 
     Session:
@@ -281,52 +344,79 @@ components:
         `refresh_token` is deliberately NOT here. It is transported only as an
         HttpOnly; Secure; SameSite=Strict cookie (CONTRACT-CHANGES C1), so JS can
         never read it and XSS cannot exfiltrate it.
-      required: [session_id, user_id, access_token, access_token_expires_at,
-                 refresh_token_expires_at, user_agent, created_at]
+      required:
+        [
+          session_id,
+          user_id,
+          access_token,
+          access_token_expires_at,
+          refresh_token_expires_at,
+          user_agent,
+          created_at,
+        ]
       additionalProperties: false
       properties:
         session_id: { type: string, format: uuid }
         user_id: { type: string, format: uuid }
         access_token: { type: string }
-        access_token_expires_at: { $ref: '#/components/schemas/Timestamp' }
-        refresh_token_expires_at: { $ref: '#/components/schemas/Timestamp' }
+        access_token_expires_at: { $ref: "#/components/schemas/Timestamp" }
+        refresh_token_expires_at: { $ref: "#/components/schemas/Timestamp" }
         user_agent: { type: string }
-        created_at: { $ref: '#/components/schemas/Timestamp' }
+        created_at: { $ref: "#/components/schemas/Timestamp" }
 
     Dataset:
       type: object
-      required: [dataset_id, owner_id, name, dataset_format, dataset_role, source,
-                 source_job_id, source_service, storage_key, size_bytes, crs, bbox,
-                 status, error_code, error_message, created_at, updated_at]
+      required:
+        [
+          dataset_id,
+          owner_id,
+          name,
+          dataset_format,
+          dataset_role,
+          source,
+          source_job_id,
+          source_service,
+          storage_key,
+          size_bytes,
+          crs,
+          bbox,
+          status,
+          error_code,
+          error_message,
+          created_at,
+          updated_at,
+        ]
       additionalProperties: false
       properties:
         dataset_id: { type: string, format: uuid }
         owner_id: { type: string, format: uuid }
         name: { type: string, minLength: 1, maxLength: 255 }
-        dataset_format: { $ref: '#/components/schemas/DatasetFormat' }
+        dataset_format: { $ref: "#/components/schemas/DatasetFormat" }
         dataset_role:
-          oneOf: [{ $ref: '#/components/schemas/DatasetRole' }, { type: 'null' }]
-        source: { $ref: '#/components/schemas/DatasetSource' }
+          oneOf:
+            [{ $ref: "#/components/schemas/DatasetRole" }, { type: "null" }]
+        source: { $ref: "#/components/schemas/DatasetSource" }
         source_job_id:
-          oneOf: [{ type: string, format: uuid }, { type: 'null' }]
+          oneOf: [{ type: string, format: uuid }, { type: "null" }]
           description: Non-null iff source == generated.
         source_service:
-          oneOf: [{ $ref: '#/components/schemas/ServiceName' }, { type: 'null' }]
+          oneOf:
+            [{ $ref: "#/components/schemas/ServiceName" }, { type: "null" }]
           description: Non-null iff source == generated.
         storage_key: { type: string }
         size_bytes: { type: integer, minimum: 0, format: int64 }
         crs:
-          oneOf: [{ $ref: '#/components/schemas/Crs' }, { type: 'null' }]
+          oneOf: [{ $ref: "#/components/schemas/Crs" }, { type: "null" }]
           description: MUST be non-null once status == ready.
         bbox:
-          oneOf: [{ $ref: '#/components/schemas/Bbox' }, { type: 'null' }]
-        status: { $ref: '#/components/schemas/DatasetStatus' }
+          oneOf: [{ $ref: "#/components/schemas/Bbox" }, { type: "null" }]
+        status: { $ref: "#/components/schemas/DatasetStatus" }
         error_code:
-          oneOf: [{ $ref: '#/components/schemas/ErrorCode' }, { type: 'null' }]
+          oneOf: [{ $ref: "#/components/schemas/ErrorCode" }, { type: "null" }]
         error_message:
-          oneOf: [{ type: string }, { type: 'null' }]
-        created_at: { $ref: '#/components/schemas/Timestamp' }
-        updated_at: { $ref: '#/components/schemas/Timestamp' }
+          oneOf: [{ type: string }, { type: "null" }]
+        created_at: { $ref: "#/components/schemas/Timestamp" }
+        updated_at: { $ref: "#/components/schemas/Timestamp" }
 
     DatasetDraft:
       type: object
@@ -336,53 +426,74 @@ components:
         owner_id, or timestamps (CONTRACT-CHANGES A2). The GATEWAY mints identity:
         dataset_id, owner_id (from job.owner_id), source=generated, source_job_id,
         source_service, status, created_at, updated_at.
-      required: [name, dataset_format, dataset_role, storage_key, size_bytes, crs, bbox]
+      required:
+        [name, dataset_format, dataset_role, storage_key, size_bytes, crs, bbox]
       additionalProperties: false
       properties:
         name: { type: string, minLength: 1, maxLength: 255 }
-        dataset_format: { $ref: '#/components/schemas/DatasetFormat' }
+        dataset_format: { $ref: "#/components/schemas/DatasetFormat" }
         dataset_role:
-          oneOf: [{ $ref: '#/components/schemas/DatasetRole' }, { type: 'null' }]
+          oneOf:
+            [{ $ref: "#/components/schemas/DatasetRole" }, { type: "null" }]
         storage_key:
           type: string
           description: MUST be under the job's `output_prefix`.
         size_bytes: { type: integer, minimum: 0, format: int64 }
-        crs: { $ref: '#/components/schemas/Crs' }
+        crs: { $ref: "#/components/schemas/Crs" }
         bbox:
-          oneOf: [{ $ref: '#/components/schemas/Bbox' }, { type: 'null' }]
+          oneOf: [{ $ref: "#/components/schemas/Bbox" }, { type: "null" }]
 
     CreditTransaction:
       type: object
-      required: [transaction_id, user_id, job_id, amount, type, balance_after, created_at]
+      required:
+        [
+          transaction_id,
+          user_id,
+          job_id,
+          amount,
+          type,
+          balance_after,
+          created_at,
+        ]
       additionalProperties: false
       properties:
         transaction_id: { type: string, format: uuid }
         user_id: { type: string, format: uuid }
         job_id:
-          oneOf: [{ type: string, format: uuid }, { type: 'null' }]
+          oneOf: [{ type: string, format: uuid }, { type: "null" }]
         amount:
           type: integer
           description: Negative = debit, positive = credit. Credits are indivisible.
-        type: { $ref: '#/components/schemas/CreditTransactionType' }
+        type: { $ref: "#/components/schemas/CreditTransactionType" }
         balance_after: { type: integer, minimum: 0 }
-        created_at: { $ref: '#/components/schemas/Timestamp' }
+        created_at: { $ref: "#/components/schemas/Timestamp" }
 
     Notification:
       type: object
-      required: [notification_id, user_id, job_id, type, message, action_url, read, created_at]
+      required:
+        [
+          notification_id,
+          user_id,
+          job_id,
+          type,
+          message,
+          action_url,
+          read,
+          created_at,
+        ]
       additionalProperties: false
       properties:
         notification_id: { type: string, format: uuid }
         user_id: { type: string, format: uuid }
         job_id:
-          oneOf: [{ type: string, format: uuid }, { type: 'null' }]
-        type: { $ref: '#/components/schemas/NotificationType' }
+          oneOf: [{ type: string, format: uuid }, { type: "null" }]
+        type: { $ref: "#/components/schemas/NotificationType" }
         message: { type: string }
         action_url:
-          oneOf: [{ type: string }, { type: 'null' }]
+          oneOf: [{ type: string }, { type: "null" }]
           description: Deep link. Lets `system`/`credit_low` (which have no job_id) be actionable.
         read: { type: boolean }
-        created_at: { $ref: '#/components/schemas/Timestamp' }
+        created_at: { $ref: "#/components/schemas/Timestamp" }
 
     # ---------- per-service params / results / inputs ----------
     # This block is the highest-leverage fix in the contract: the PDF expressed all of
@@ -401,7 +512,7 @@ components:
           uniqueItems: true
           items: { type: string, enum: [geojson, pmtiles] }
         output_crs:
-          oneOf: [{ $ref: '#/components/schemas/Crs' }, { type: 'null' }]
+          oneOf: [{ $ref: "#/components/schemas/Crs" }, { type: "null" }]
       # NOTE: params.aoi_geojson deleted (CONTRACT-CHANGES A6). AOI travels exactly one
       # way: input_datasets.aoi. Two channels with no precedence rule meant validating
       # against one AOI while processing another — wrong result, wrong bill, no error.
@@ -415,7 +526,13 @@ components:
 
     BuildingExtractionResult:
       type: object
-      required: [building_count, area_km2, confidence_avg_percent, output_formats_generated]
+      required:
+        [
+          building_count,
+          area_km2,
+          confidence_avg_percent,
+          output_formats_generated,
+        ]
       additionalProperties: false
       properties:
         building_count: { type: integer, minimum: 0 }
@@ -437,7 +554,7 @@ components:
           uniqueItems: true
           items: { type: string, enum: [las, laz, 3dtiles, geotiff] }
         output_crs:
-          oneOf: [{ $ref: '#/components/schemas/Crs' }, { type: 'null' }]
+          oneOf: [{ $ref: "#/components/schemas/Crs" }, { type: "null" }]
 
     PointCloudClassificationInputs:
       type: object
@@ -465,7 +582,8 @@ components:
             Discover a model's classes at runtime via /capabilities rather than
             hardcoding keys in the UI.
           additionalProperties: { type: integer, minimum: 0 }
-          examples: [{ ground: 120, vegetation: 80, building: 40, unclassified: 5 }]
+          examples:
+            [{ ground: 120, vegetation: 80, building: 40, unclassified: 5 }]
         output_formats_generated:
           type: array
           items: { type: string, enum: [las, laz, 3dtiles, geotiff] }
@@ -485,7 +603,7 @@ components:
           uniqueItems: true
           items: { type: string, enum: [geojson, pmtiles] }
         output_crs:
-          oneOf: [{ $ref: '#/components/schemas/Crs' }, { type: 'null' }]
+          oneOf: [{ $ref: "#/components/schemas/Crs" }, { type: "null" }]
 
     LandcoverDetectionInputs:
       type: object
@@ -540,7 +658,7 @@ components:
           uniqueItems: true
           items: { type: string, enum: [gltf, 3dtiles] }
         output_crs:
-          oneOf: [{ $ref: '#/components/schemas/Crs' }, { type: 'null' }]
+          oneOf: [{ $ref: "#/components/schemas/Crs" }, { type: "null" }]
 
     Reconstruction3dInputs:
       type: object
@@ -565,7 +683,8 @@ components:
 
     Reconstruction3dResult:
       type: object
-      required: [mesh_triangle_count, buildings_reconstructed, output_formats_generated]
+      required:
+        [mesh_triangle_count, buildings_reconstructed, output_formats_generated]
       additionalProperties: false
       properties:
         mesh_triangle_count: { type: integer, minimum: 0 }
@@ -583,7 +702,7 @@ components:
           type: string
           enum: [3dtiles, pmtiles, geojson, cog, las, laz, gltf]
         output_crs:
-          oneOf: [{ $ref: '#/components/schemas/Crs' }, { type: 'null' }]
+          oneOf: [{ $ref: "#/components/schemas/Crs" }, { type: "null" }]
       # Legal (source_format -> target_format) pairs are served at runtime by
       # GET /v1/internal/converter/capabilities so the UI never offers an impossible
       # conversion. The PDF left all 119 pairs unspecified (CONTRACT-CHANGES D11).
@@ -600,27 +719,42 @@ components:
       required: [output_format, output_size_bytes]
       additionalProperties: false
       properties:
-        output_format: { $ref: '#/components/schemas/DatasetFormat' }
+        output_format: { $ref: "#/components/schemas/DatasetFormat" }
         output_size_bytes: { type: integer, minimum: 0, format: int64 }
 
     # ---------- Job (discriminated union on `service`) ----------
     JobBase:
       type: object
-      required: [job_id, owner_id, service, status, job_name, output_dataset_ids,
-                 credits_estimated, credits_used, progress_percent, error_code,
-                 error_message, created_at, started_at, completed_at, updated_at]
+      required:
+        [
+          job_id,
+          owner_id,
+          service,
+          status,
+          job_name,
+          output_dataset_ids,
+          credits_estimated,
+          credits_used,
+          progress_percent,
+          error_code,
+          error_message,
+          created_at,
+          started_at,
+          completed_at,
+          updated_at,
+        ]
       properties:
         job_id: { type: string, format: uuid }
         owner_id: { type: string, format: uuid }
-        service: { $ref: '#/components/schemas/ServiceName' }
-        status: { $ref: '#/components/schemas/JobStatus' }
+        service: { $ref: "#/components/schemas/ServiceName" }
+        status: { $ref: "#/components/schemas/JobStatus" }
         job_name: { type: string, minLength: 1, maxLength: 255 }
         output_dataset_ids:
           type: array
           items: { type: string, format: uuid }
         credits_estimated: { type: integer, minimum: 0 }
         credits_used:
-          oneOf: [{ type: integer, minimum: 0 }, { type: 'null' }]
+          oneOf: [{ type: integer, minimum: 0 }, { type: "null" }]
           description: Reported by the service in the terminal callback. Null until terminal.
         progress_percent:
           type: integer
@@ -631,16 +765,16 @@ components:
             callback; a Python 66.6667 would truncate or 500 the handler).
             Monotonic — the gateway drops backwards progress. status=complete implies 100.
         error_code:
-          oneOf: [{ $ref: '#/components/schemas/ErrorCode' }, { type: 'null' }]
+          oneOf: [{ $ref: "#/components/schemas/ErrorCode" }, { type: "null" }]
         error_message:
-          oneOf: [{ type: string }, { type: 'null' }]
-        created_at: { $ref: '#/components/schemas/Timestamp' }
+          oneOf: [{ type: string }, { type: "null" }]
+        created_at: { $ref: "#/components/schemas/Timestamp" }
         started_at:
-          oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }]
+          oneOf: [{ $ref: "#/components/schemas/Timestamp" }, { type: "null" }]
           description: Set by the GATEWAY when it receives the service's first processing callback.
         completed_at:
-          oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }]
-        updated_at: { $ref: '#/components/schemas/Timestamp' }
+          oneOf: [{ $ref: "#/components/schemas/Timestamp" }, { type: "null" }]
+        updated_at: { $ref: "#/components/schemas/Timestamp" }
 
     BuildingExtractionJob:
       # Closed via unevaluatedProperties at the composed level, NOT
@@ -649,93 +783,120 @@ components:
       # Same idiom on all five Job variants.
       unevaluatedProperties: false
       allOf:
-        - $ref: '#/components/schemas/JobBase'
+        - $ref: "#/components/schemas/JobBase"
         - type: object
           required: [service, model, input_dataset_ids, params, result_summary]
           properties:
             service: { type: string, const: building_extraction }
             model: { type: string, enum: [cascade_building, geocarta] }
-            input_dataset_ids: { $ref: '#/components/schemas/BuildingExtractionInputs' }
-            params: { $ref: '#/components/schemas/BuildingExtractionParams' }
+            input_dataset_ids:
+              { $ref: "#/components/schemas/BuildingExtractionInputs" }
+            params: { $ref: "#/components/schemas/BuildingExtractionParams" }
             result_summary:
-              oneOf: [{ $ref: '#/components/schemas/BuildingExtractionResult' }, { type: 'null' }]
+              oneOf:
+                [
+                  { $ref: "#/components/schemas/BuildingExtractionResult" },
+                  { type: "null" },
+                ]
 
     PointCloudClassificationJob:
       unevaluatedProperties: false
       allOf:
-        - $ref: '#/components/schemas/JobBase'
+        - $ref: "#/components/schemas/JobBase"
         - type: object
           required: [service, model, input_dataset_ids, params, result_summary]
           properties:
             service: { type: string, const: pointcloud_classification }
             model: { type: string, enum: [csf, dgcnn] }
-            input_dataset_ids: { $ref: '#/components/schemas/PointCloudClassificationInputs' }
-            params: { $ref: '#/components/schemas/PointCloudClassificationParams' }
+            input_dataset_ids:
+              { $ref: "#/components/schemas/PointCloudClassificationInputs" }
+            params:
+              { $ref: "#/components/schemas/PointCloudClassificationParams" }
             result_summary:
-              oneOf: [{ $ref: '#/components/schemas/PointCloudClassificationResult' }, { type: 'null' }]
+              oneOf:
+                [
+                  {
+                    $ref: "#/components/schemas/PointCloudClassificationResult",
+                  },
+                  { type: "null" },
+                ]
 
     LandcoverDetectionJob:
       unevaluatedProperties: false
       allOf:
-        - $ref: '#/components/schemas/JobBase'
+        - $ref: "#/components/schemas/JobBase"
         - type: object
           required: [service, model, input_dataset_ids, params, result_summary]
           properties:
             service: { type: string, const: landcover_detection }
             model: { type: string, enum: [pandala] }
-            input_dataset_ids: { $ref: '#/components/schemas/LandcoverDetectionInputs' }
-            params: { $ref: '#/components/schemas/LandcoverDetectionParams' }
+            input_dataset_ids:
+              { $ref: "#/components/schemas/LandcoverDetectionInputs" }
+            params: { $ref: "#/components/schemas/LandcoverDetectionParams" }
             result_summary:
-              oneOf: [{ $ref: '#/components/schemas/LandcoverDetectionResult' }, { type: 'null' }]
+              oneOf:
+                [
+                  { $ref: "#/components/schemas/LandcoverDetectionResult" },
+                  { type: "null" },
+                ]
 
     Reconstruction3dJob:
       unevaluatedProperties: false
       allOf:
-        - $ref: '#/components/schemas/JobBase'
+        - $ref: "#/components/schemas/JobBase"
         - type: object
           required: [service, model, input_dataset_ids, params, result_summary]
           properties:
             service: { type: string, const: reconstruction_3d }
             model: { type: string, enum: [dream3d, cascade_mesh] }
-            input_dataset_ids: { $ref: '#/components/schemas/Reconstruction3dInputs' }
-            params: { $ref: '#/components/schemas/Reconstruction3dParams' }
+            input_dataset_ids:
+              { $ref: "#/components/schemas/Reconstruction3dInputs" }
+            params: { $ref: "#/components/schemas/Reconstruction3dParams" }
             result_summary:
-              oneOf: [{ $ref: '#/components/schemas/Reconstruction3dResult' }, { type: 'null' }]
+              oneOf:
+                [
+                  { $ref: "#/components/schemas/Reconstruction3dResult" },
+                  { type: "null" },
+                ]
 
     ConverterJob:
       unevaluatedProperties: false
       allOf:
-        - $ref: '#/components/schemas/JobBase'
+        - $ref: "#/components/schemas/JobBase"
         - type: object
           required: [service, model, input_dataset_ids, params, result_summary]
           properties:
             service: { type: string, const: converter }
             model:
-              type: 'null'
+              type: "null"
               description: |
                 Converter has no model. The PDF made Job.model a required non-null
                 string while listing no models for converter, so every converter job
                 had to send a value that could not validate (CONTRACT-CHANGES A7).
-            input_dataset_ids: { $ref: '#/components/schemas/ConverterInputs' }
-            params: { $ref: '#/components/schemas/ConverterParams' }
+            input_dataset_ids: { $ref: "#/components/schemas/ConverterInputs" }
+            params: { $ref: "#/components/schemas/ConverterParams" }
             result_summary:
-              oneOf: [{ $ref: '#/components/schemas/ConverterResult' }, { type: 'null' }]
+              oneOf:
+                [
+                  { $ref: "#/components/schemas/ConverterResult" },
+                  { type: "null" },
+                ]
 
     Job:
       oneOf:
-        - $ref: '#/components/schemas/BuildingExtractionJob'
-        - $ref: '#/components/schemas/PointCloudClassificationJob'
-        - $ref: '#/components/schemas/LandcoverDetectionJob'
-        - $ref: '#/components/schemas/Reconstruction3dJob'
-        - $ref: '#/components/schemas/ConverterJob'
+        - $ref: "#/components/schemas/BuildingExtractionJob"
+        - $ref: "#/components/schemas/PointCloudClassificationJob"
+        - $ref: "#/components/schemas/LandcoverDetectionJob"
+        - $ref: "#/components/schemas/Reconstruction3dJob"
+        - $ref: "#/components/schemas/ConverterJob"
       discriminator:
         propertyName: service
         mapping:
-          building_extraction: '#/components/schemas/BuildingExtractionJob'
-          pointcloud_classification: '#/components/schemas/PointCloudClassificationJob'
-          landcover_detection: '#/components/schemas/LandcoverDetectionJob'
-          reconstruction_3d: '#/components/schemas/Reconstruction3dJob'
-          converter: '#/components/schemas/ConverterJob'
+          building_extraction: "#/components/schemas/BuildingExtractionJob"
+          pointcloud_classification: "#/components/schemas/PointCloudClassificationJob"
+          landcover_detection: "#/components/schemas/LandcoverDetectionJob"
+          reconstruction_3d: "#/components/schemas/Reconstruction3dJob"
+          converter: "#/components/schemas/ConverterJob"
 
     # ---------- callback ----------
     JobCallback:
@@ -754,8 +915,19 @@ components:
           - drop non-terminal callbacks once the job is terminal
           - a terminal callback for a `cancelled` job is ignored and its outputs GC'd
           - handling is idempotent on (job_id, sequence)
-      required: [job_id, sequence, emitted_at, status, progress_percent,
-                 output_datasets, result_summary, credits_used, error_code, error_message]
+      required:
+        [
+          job_id,
+          sequence,
+          emitted_at,
+          status,
+          progress_percent,
+          output_datasets,
+          result_summary,
+          credits_used,
+          error_code,
+          error_message,
+        ]
       additionalProperties: false
       properties:
         job_id: { type: string, format: uuid }
@@ -763,28 +935,28 @@ components:
           type: integer
           minimum: 0
           description: Monotonic per job, assigned by the service. Enables replay/reorder rejection.
-        emitted_at: { $ref: '#/components/schemas/Timestamp' }
-        status: { $ref: '#/components/schemas/ServiceReportedStatus' }
+        emitted_at: { $ref: "#/components/schemas/Timestamp" }
+        status: { $ref: "#/components/schemas/ServiceReportedStatus" }
         progress_percent: { type: integer, minimum: 0, maximum: 100 }
         output_datasets:
           type: array
           description: Empty unless status == complete. Drafts, not Datasets (see DatasetDraft).
-          items: { $ref: '#/components/schemas/DatasetDraft' }
+          items: { $ref: "#/components/schemas/DatasetDraft" }
         result_summary:
           oneOf:
-            - $ref: '#/components/schemas/BuildingExtractionResult'
-            - $ref: '#/components/schemas/PointCloudClassificationResult'
-            - $ref: '#/components/schemas/LandcoverDetectionResult'
-            - $ref: '#/components/schemas/Reconstruction3dResult'
-            - $ref: '#/components/schemas/ConverterResult'
-            - type: 'null'
+            - $ref: "#/components/schemas/BuildingExtractionResult"
+            - $ref: "#/components/schemas/PointCloudClassificationResult"
+            - $ref: "#/components/schemas/LandcoverDetectionResult"
+            - $ref: "#/components/schemas/Reconstruction3dResult"
+            - $ref: "#/components/schemas/ConverterResult"
+            - type: "null"
         credits_used:
-          oneOf: [{ type: integer, minimum: 0 }, { type: 'null' }]
+          oneOf: [{ type: integer, minimum: 0 }, { type: "null" }]
           description: Actual consumption. Required when status is terminal.
         error_code:
-          oneOf: [{ $ref: '#/components/schemas/ErrorCode' }, { type: 'null' }]
+          oneOf: [{ $ref: "#/components/schemas/ErrorCode" }, { type: "null" }]
         error_message:
-          oneOf: [{ type: string }, { type: 'null' }]
+          oneOf: [{ type: string }, { type: "null" }]
 
     JobCallbackAck:
       type: object
@@ -853,9 +1025,10 @@ components:
       additionalProperties: false
       properties:
         name: { type: string, minLength: 1, maxLength: 255 }
-        dataset_format: { $ref: '#/components/schemas/DatasetFormat' }
+        dataset_format: { $ref: "#/components/schemas/DatasetFormat" }
         dataset_role:
-          oneOf: [{ $ref: '#/components/schemas/DatasetRole' }, { type: 'null' }]
+          oneOf:
+            [{ $ref: "#/components/schemas/DatasetRole" }, { type: "null" }]
         size_bytes: { type: integer, minimum: 1, format: int64 }
         content_type: { type: string }
 
@@ -876,7 +1049,7 @@ components:
             properties:
               part_number: { type: integer, minimum: 1 }
               url: { type: string }
-        expires_at: { $ref: '#/components/schemas/Timestamp' }
+        expires_at: { $ref: "#/components/schemas/Timestamp" }
 
     CompleteUploadRequest:
       type: object
@@ -900,19 +1073,19 @@ components:
         validated together. All referenced datasets MUST be status=ready at both create
         and submit (422 DATASET_NOT_READY otherwise) — a draft may be submitted days later.
       oneOf:
-        - $ref: '#/components/schemas/CreateBuildingExtractionJobRequest'
-        - $ref: '#/components/schemas/CreatePointCloudClassificationJobRequest'
-        - $ref: '#/components/schemas/CreateLandcoverDetectionJobRequest'
-        - $ref: '#/components/schemas/CreateReconstruction3dJobRequest'
-        - $ref: '#/components/schemas/CreateConverterJobRequest'
+        - $ref: "#/components/schemas/CreateBuildingExtractionJobRequest"
+        - $ref: "#/components/schemas/CreatePointCloudClassificationJobRequest"
+        - $ref: "#/components/schemas/CreateLandcoverDetectionJobRequest"
+        - $ref: "#/components/schemas/CreateReconstruction3dJobRequest"
+        - $ref: "#/components/schemas/CreateConverterJobRequest"
       discriminator:
         propertyName: service
         mapping:
-          building_extraction: '#/components/schemas/CreateBuildingExtractionJobRequest'
-          pointcloud_classification: '#/components/schemas/CreatePointCloudClassificationJobRequest'
-          landcover_detection: '#/components/schemas/CreateLandcoverDetectionJobRequest'
-          reconstruction_3d: '#/components/schemas/CreateReconstruction3dJobRequest'
-          converter: '#/components/schemas/CreateConverterJobRequest'
+          building_extraction: "#/components/schemas/CreateBuildingExtractionJobRequest"
+          pointcloud_classification: "#/components/schemas/CreatePointCloudClassificationJobRequest"
+          landcover_detection: "#/components/schemas/CreateLandcoverDetectionJobRequest"
+          reconstruction_3d: "#/components/schemas/CreateReconstruction3dJobRequest"
+          converter: "#/components/schemas/CreateConverterJobRequest"
 
     CreateJobRequestBase:
       type: object
@@ -929,7 +1102,7 @@ components:
 
     CreateBuildingExtractionJobRequest:
       allOf:
-        - $ref: '#/components/schemas/CreateJobRequestBase'
+        - $ref: "#/components/schemas/CreateJobRequestBase"
         - type: object
           required: [service, model, input_dataset_ids, params]
           additionalProperties: false
@@ -938,12 +1111,13 @@ components:
             model: { type: string, enum: [cascade_building, geocarta] }
             job_name: { type: string }
             save_as_draft: { type: boolean }
-            input_dataset_ids: { $ref: '#/components/schemas/BuildingExtractionInputs' }
-            params: { $ref: '#/components/schemas/BuildingExtractionParams' }
+            input_dataset_ids:
+              { $ref: "#/components/schemas/BuildingExtractionInputs" }
+            params: { $ref: "#/components/schemas/BuildingExtractionParams" }
 
     CreatePointCloudClassificationJobRequest:
       allOf:
-        - $ref: '#/components/schemas/CreateJobRequestBase'
+        - $ref: "#/components/schemas/CreateJobRequestBase"
         - type: object
           required: [service, model, input_dataset_ids, params]
           additionalProperties: false
@@ -952,12 +1126,14 @@ components:
             model: { type: string, enum: [csf, dgcnn] }
             job_name: { type: string }
             save_as_draft: { type: boolean }
-            input_dataset_ids: { $ref: '#/components/schemas/PointCloudClassificationInputs' }
-            params: { $ref: '#/components/schemas/PointCloudClassificationParams' }
+            input_dataset_ids:
+              { $ref: "#/components/schemas/PointCloudClassificationInputs" }
+            params:
+              { $ref: "#/components/schemas/PointCloudClassificationParams" }
 
     CreateLandcoverDetectionJobRequest:
       allOf:
-        - $ref: '#/components/schemas/CreateJobRequestBase'
+        - $ref: "#/components/schemas/CreateJobRequestBase"
         - type: object
           required: [service, model, input_dataset_ids, params]
           additionalProperties: false
@@ -966,12 +1142,13 @@ components:
             model: { type: string, enum: [pandala] }
             job_name: { type: string }
             save_as_draft: { type: boolean }
-            input_dataset_ids: { $ref: '#/components/schemas/LandcoverDetectionInputs' }
-            params: { $ref: '#/components/schemas/LandcoverDetectionParams' }
+            input_dataset_ids:
+              { $ref: "#/components/schemas/LandcoverDetectionInputs" }
+            params: { $ref: "#/components/schemas/LandcoverDetectionParams" }
 
     CreateReconstruction3dJobRequest:
       allOf:
-        - $ref: '#/components/schemas/CreateJobRequestBase'
+        - $ref: "#/components/schemas/CreateJobRequestBase"
         - type: object
           required: [service, model, input_dataset_ids, params]
           additionalProperties: false
@@ -980,22 +1157,23 @@ components:
             model: { type: string, enum: [dream3d, cascade_mesh] }
             job_name: { type: string }
             save_as_draft: { type: boolean }
-            input_dataset_ids: { $ref: '#/components/schemas/Reconstruction3dInputs' }
-            params: { $ref: '#/components/schemas/Reconstruction3dParams' }
+            input_dataset_ids:
+              { $ref: "#/components/schemas/Reconstruction3dInputs" }
+            params: { $ref: "#/components/schemas/Reconstruction3dParams" }
 
     CreateConverterJobRequest:
       allOf:
-        - $ref: '#/components/schemas/CreateJobRequestBase'
+        - $ref: "#/components/schemas/CreateJobRequestBase"
         - type: object
           required: [service, input_dataset_ids, params]
           additionalProperties: false
           properties:
             service: { type: string, const: converter }
-            model: { type: 'null' }
+            model: { type: "null" }
             job_name: { type: string }
             save_as_draft: { type: boolean }
-            input_dataset_ids: { $ref: '#/components/schemas/ConverterInputs' }
-            params: { $ref: '#/components/schemas/ConverterParams' }
+            input_dataset_ids: { $ref: "#/components/schemas/ConverterInputs" }
+            params: { $ref: "#/components/schemas/ConverterParams" }
 
     EstimateResponse:
       type: object
@@ -1025,7 +1203,13 @@ components:
 
     UsageSummary:
       type: object
-      required: [storage_used_bytes, storage_quota_bytes, credits_remaining, recent_transactions]
+      required:
+        [
+          storage_used_bytes,
+          storage_quota_bytes,
+          credits_remaining,
+          recent_transactions,
+        ]
       additionalProperties: false
       properties:
         storage_used_bytes: { type: integer, minimum: 0, format: int64 }
@@ -1035,7 +1219,7 @@ components:
           type: array
           maxItems: 10
           description: Last 10, newest first. Full history via GET /credits/transactions.
-          items: { $ref: '#/components/schemas/CreditTransaction' }
+          items: { $ref: "#/components/schemas/CreditTransaction" }
 
     # ---------- internal service interface ----------
     ResolvedDataset:
@@ -1044,46 +1228,68 @@ components:
         What the gateway sends a service in place of a bare UUID: the dataset metadata
         plus a signed READ url. TTL MUST exceed max queue wait + max_job_duration, or a
         long-queued job dies on an expired URL (CONTRACT-CHANGES D15).
-      required: [dataset_id, name, dataset_format, dataset_role, size_bytes, crs, bbox,
-                 signed_url, signed_url_expires_at]
+      required:
+        [
+          dataset_id,
+          name,
+          dataset_format,
+          dataset_role,
+          size_bytes,
+          crs,
+          bbox,
+          signed_url,
+          signed_url_expires_at,
+        ]
       additionalProperties: false
       properties:
         dataset_id: { type: string, format: uuid }
         name: { type: string }
-        dataset_format: { $ref: '#/components/schemas/DatasetFormat' }
+        dataset_format: { $ref: "#/components/schemas/DatasetFormat" }
         dataset_role:
-          oneOf: [{ $ref: '#/components/schemas/DatasetRole' }, { type: 'null' }]
+          oneOf:
+            [{ $ref: "#/components/schemas/DatasetRole" }, { type: "null" }]
         size_bytes: { type: integer, minimum: 0, format: int64 }
-        crs: { $ref: '#/components/schemas/Crs' }
+        crs: { $ref: "#/components/schemas/Crs" }
         bbox:
-          oneOf: [{ $ref: '#/components/schemas/Bbox' }, { type: 'null' }]
-        signed_url: { type: string, description: 'Treat as a credential. Never log.' }
-        signed_url_expires_at: { $ref: '#/components/schemas/Timestamp' }
+          oneOf: [{ $ref: "#/components/schemas/Bbox" }, { type: "null" }]
+        signed_url:
+          { type: string, description: "Treat as a credential. Never log." }
+        signed_url_expires_at: { $ref: "#/components/schemas/Timestamp" }
 
     InternalJobRequest:
       type: object
       description: |
         Gateway -> Service. `input_datasets` maps the SAME keys as the job's
         input_dataset_ids, with UUIDs resolved to ResolvedDataset.
-      required: [job_id, service, model, input_datasets, params,
-                 output_prefix, output_upload_urls, callback_url, max_job_duration_seconds,
-                 heartbeat_interval_seconds]
+      required:
+        [
+          job_id,
+          service,
+          model,
+          input_datasets,
+          params,
+          output_prefix,
+          output_upload_urls,
+          callback_url,
+          max_job_duration_seconds,
+          heartbeat_interval_seconds,
+        ]
       additionalProperties: false
       properties:
         job_id: { type: string, format: uuid }
-        service: { $ref: '#/components/schemas/ServiceName' }
+        service: { $ref: "#/components/schemas/ServiceName" }
         model:
-          oneOf: [{ type: string }, { type: 'null' }]
+          oneOf: [{ type: string }, { type: "null" }]
         input_datasets:
           type: object
-          additionalProperties: { $ref: '#/components/schemas/ResolvedDataset' }
+          additionalProperties: { $ref: "#/components/schemas/ResolvedDataset" }
         params:
           oneOf:
-            - $ref: '#/components/schemas/BuildingExtractionParams'
-            - $ref: '#/components/schemas/PointCloudClassificationParams'
-            - $ref: '#/components/schemas/LandcoverDetectionParams'
-            - $ref: '#/components/schemas/Reconstruction3dParams'
-            - $ref: '#/components/schemas/ConverterParams'
+            - $ref: "#/components/schemas/BuildingExtractionParams"
+            - $ref: "#/components/schemas/PointCloudClassificationParams"
+            - $ref: "#/components/schemas/LandcoverDetectionParams"
+            - $ref: "#/components/schemas/Reconstruction3dParams"
+            - $ref: "#/components/schemas/ConverterParams"
         output_prefix:
           type: string
           description: |
@@ -1098,10 +1304,10 @@ components:
             required: [output_format, storage_key, url, expires_at]
             additionalProperties: false
             properties:
-              output_format: { $ref: '#/components/schemas/DatasetFormat' }
+              output_format: { $ref: "#/components/schemas/DatasetFormat" }
               storage_key: { type: string }
               url: { type: string }
-              expires_at: { $ref: '#/components/schemas/Timestamp' }
+              expires_at: { $ref: "#/components/schemas/Timestamp" }
         callback_url: { type: string }
         max_job_duration_seconds:
           type: integer
@@ -1133,7 +1339,7 @@ components:
       additionalProperties: false
       properties:
         job_id: { type: string, format: uuid }
-        status: { $ref: '#/components/schemas/ServiceReportedStatus' }
+        status: { $ref: "#/components/schemas/ServiceReportedStatus" }
         progress_percent: { type: integer, minimum: 0, maximum: 100 }
 
     InternalEstimateRequest:
@@ -1143,14 +1349,14 @@ components:
       properties:
         input_datasets:
           type: object
-          additionalProperties: { $ref: '#/components/schemas/ResolvedDataset' }
+          additionalProperties: { $ref: "#/components/schemas/ResolvedDataset" }
         params:
           oneOf:
-            - $ref: '#/components/schemas/BuildingExtractionParams'
-            - $ref: '#/components/schemas/PointCloudClassificationParams'
-            - $ref: '#/components/schemas/LandcoverDetectionParams'
-            - $ref: '#/components/schemas/Reconstruction3dParams'
-            - $ref: '#/components/schemas/ConverterParams'
+            - $ref: "#/components/schemas/BuildingExtractionParams"
+            - $ref: "#/components/schemas/PointCloudClassificationParams"
+            - $ref: "#/components/schemas/LandcoverDetectionParams"
+            - $ref: "#/components/schemas/Reconstruction3dParams"
+            - $ref: "#/components/schemas/ConverterParams"
 
     ServiceCapabilities:
       type: object
@@ -1158,10 +1364,18 @@ components:
         Lets the gateway/UI discover what a service supports instead of hardcoding it.
         For the converter this carries the source->target conversion matrix, so the UI
         never offers an impossible conversion the user would be billed for.
-      required: [service, version, contract_version, models, output_formats, max_input_size_bytes]
+      required:
+        [
+          service,
+          version,
+          contract_version,
+          models,
+          output_formats,
+          max_input_size_bytes,
+        ]
       additionalProperties: false
       properties:
-        service: { $ref: '#/components/schemas/ServiceName' }
+        service: { $ref: "#/components/schemas/ServiceName" }
         version: { type: string }
         contract_version: { type: string }
         models:
@@ -1169,14 +1383,14 @@ components:
           items: { type: string }
         output_formats:
           type: array
-          items: { $ref: '#/components/schemas/DatasetFormat' }
+          items: { $ref: "#/components/schemas/DatasetFormat" }
         max_input_size_bytes: { type: integer, format: int64 }
         conversion_matrix:
           type: object
           description: converter only. source dataset_format -> allowed target formats.
           additionalProperties:
             type: array
-            items: { $ref: '#/components/schemas/DatasetFormat' }
+            items: { $ref: "#/components/schemas/DatasetFormat" }
 
     HealthResponse:
       type: object
@@ -1185,46 +1399,46 @@ components:
       properties:
         status: { type: string, enum: [ok, degraded, error] }
         detail:
-          oneOf: [{ type: object }, { type: 'null' }]
+          oneOf: [{ type: object }, { type: "null" }]
 
   responses:
     BadRequest:
       description: Validation failed.
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
     Unauthorized:
       description: Missing or invalid credentials.
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
     Forbidden:
       description: Authenticated but not permitted.
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
     NotFound:
       description: |
         Not found, OR found but owned by another user — cross-owner access returns 404
         rather than 403 to prevent ID enumeration (CONTRACT-CHANGES C2).
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
     Conflict:
       description: State conflict (duplicate job, illegal transition, dataset in use).
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
     PaymentRequired:
       description: Insufficient credits.
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
     UnprocessableEntity:
       description: Semantically invalid (bad model/dataset combination, missing input, CRS mismatch).
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
     UnexpectedError:
       description: |
         Any status not otherwise documented — including 500 INTERNAL_ERROR. Every
@@ -1232,7 +1446,7 @@ components:
         to fall back on instead of parsing ad-hoc text.
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
     TooManyRequests:
       description: Rate limited. Carries Retry-After and X-RateLimit-* headers.
       headers:
@@ -1242,7 +1456,7 @@ components:
         X-RateLimit-Reset: { schema: { type: integer } }
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
 
 security:
   - accessToken: []
@@ -1254,15 +1468,15 @@ paths:
       tags: [auth]
       summary: Register a new user
       security: []
-      parameters: [{ $ref: '#/components/parameters/RequestId' }]
+      parameters: [{ $ref: "#/components/parameters/RequestId" }]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/RegisterRequest' }
+            schema: { $ref: "#/components/schemas/RegisterRequest" }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '201':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "201":
           description: |
             Created. Sets the refresh token as an HttpOnly; Secure; SameSite=Strict;
             Path=/v1/auth; Max-Age=2592000 cookie. It is never in the response body.
@@ -1280,30 +1494,30 @@ paths:
                     required: [user, organization, session]
                     additionalProperties: false
                     properties:
-                      user: { $ref: '#/components/schemas/User' }
+                      user: { $ref: "#/components/schemas/User" }
                       organization:
-                        allOf: [{ $ref: '#/components/schemas/Organization' }]
+                        allOf: [{ $ref: "#/components/schemas/Organization" }]
                         description: The personal organization created for this user.
-                      session: { $ref: '#/components/schemas/Session' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '429': { $ref: '#/components/responses/TooManyRequests' }
+                      session: { $ref: "#/components/schemas/Session" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /auth/login:
     post:
       tags: [auth]
       summary: Log in
       security: []
-      parameters: [{ $ref: '#/components/parameters/RequestId' }]
+      parameters: [{ $ref: "#/components/parameters/RequestId" }]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/LoginRequest' }
+            schema: { $ref: "#/components/schemas/LoginRequest" }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: Authenticated. Refresh token set as an HttpOnly cookie.
           headers:
             Set-Cookie: { schema: { type: string } }
@@ -1319,11 +1533,11 @@ paths:
                     required: [user, session]
                     additionalProperties: false
                     properties:
-                      user: { $ref: '#/components/schemas/User' }
-                      session: { $ref: '#/components/schemas/Session' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '429': { $ref: '#/components/responses/TooManyRequests' }
+                      user: { $ref: "#/components/schemas/User" }
+                      session: { $ref: "#/components/schemas/Session" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /auth/refresh:
     post:
@@ -1335,10 +1549,10 @@ paths:
         (CONTRACT-CHANGES C1). Rotates the refresh token; reuse of a rotated token
         revokes the whole family.
       security: []
-      parameters: [{ $ref: '#/components/parameters/RequestId' }]
+      parameters: [{ $ref: "#/components/parameters/RequestId" }]
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: New session.
           headers:
             Set-Cookie: { schema: { type: string } }
@@ -1354,9 +1568,9 @@ paths:
                     required: [session]
                     additionalProperties: false
                     properties:
-                      session: { $ref: '#/components/schemas/Session' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
+                      session: { $ref: "#/components/schemas/Session" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /auth/logout:
     post:
@@ -1366,24 +1580,24 @@ paths:
         Revokes the refresh token for the current session (or all sessions when
         all_devices=true) and clears the cookie. Already-issued access tokens remain
         valid until they expire — stated explicitly because JWTs are stateless.
-      parameters: [{ $ref: '#/components/parameters/RequestId' }]
+      parameters: [{ $ref: "#/components/parameters/RequestId" }]
       requestBody:
         required: false
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/LogoutRequest' }
+            schema: { $ref: "#/components/schemas/LogoutRequest" }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '204': { description: Logged out. }
-        '401': { $ref: '#/components/responses/Unauthorized' }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "204": { description: Logged out. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /sessions:
     get:
       tags: [auth]
       summary: List active sessions
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: Sessions for the current user.
           content:
             application/json:
@@ -1394,9 +1608,9 @@ paths:
                 properties:
                   data:
                     type: array
-                    items: { $ref: '#/components/schemas/Session' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
+                    items: { $ref: "#/components/schemas/Session" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /sessions/{session_id}:
     delete:
@@ -1408,10 +1622,10 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '204': { description: Revoked. }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "204": { description: Revoked. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   # ==================== USERS ====================
   /users/me:
@@ -1419,8 +1633,8 @@ paths:
       tags: [users]
       summary: Current user
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: OK
           content:
             application/json:
@@ -1434,9 +1648,9 @@ paths:
                     required: [user]
                     additionalProperties: false
                     properties:
-                      user: { $ref: '#/components/schemas/User' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
+                      user: { $ref: "#/components/schemas/User" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
     patch:
       tags: [users]
       summary: Update current user
@@ -1444,10 +1658,10 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/UpdateUserRequest' }
+            schema: { $ref: "#/components/schemas/UpdateUserRequest" }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: Updated
           content:
             application/json:
@@ -1461,18 +1675,18 @@ paths:
                     required: [user]
                     additionalProperties: false
                     properties:
-                      user: { $ref: '#/components/schemas/User' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
+                      user: { $ref: "#/components/schemas/User" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /users/me/usage:
     get:
       tags: [users]
       summary: Storage and credit usage
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: OK
           content:
             application/json:
@@ -1481,17 +1695,17 @@ paths:
                 required: [data, meta]
                 additionalProperties: false
                 properties:
-                  data: { $ref: '#/components/schemas/UsageSummary' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
+                  data: { $ref: "#/components/schemas/UsageSummary" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /organizations/me:
     get:
       tags: [users]
       summary: The caller's organization
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: OK
           content:
             application/json:
@@ -1505,9 +1719,10 @@ paths:
                     required: [organization]
                     additionalProperties: false
                     properties:
-                      organization: { $ref: '#/components/schemas/Organization' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
+                      organization:
+                        { $ref: "#/components/schemas/Organization" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
     patch:
       tags: [users]
       summary: Rename the organization
@@ -1518,10 +1733,10 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/UpdateOrganizationRequest' }
+            schema: { $ref: "#/components/schemas/UpdateOrganizationRequest" }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: Updated
           content:
             application/json:
@@ -1535,23 +1750,24 @@ paths:
                     required: [organization]
                     additionalProperties: false
                     properties:
-                      organization: { $ref: '#/components/schemas/Organization' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { $ref: '#/components/responses/Conflict' }
+                      organization:
+                        { $ref: "#/components/schemas/Organization" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
 
   /organizations/me/members:
     get:
       tags: [users]
       summary: List organization members
-      description: '`enterprise_admin` only. A personal org always returns exactly one member.'
+      description: "`enterprise_admin` only. A personal org always returns exactly one member."
       parameters:
-        - { $ref: '#/components/parameters/Page' }
-        - { $ref: '#/components/parameters/PageSize' }
+        - { $ref: "#/components/parameters/Page" }
+        - { $ref: "#/components/parameters/PageSize" }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: OK
           content:
             application/json:
@@ -1562,30 +1778,30 @@ paths:
                 properties:
                   data:
                     type: array
-                    items: { $ref: '#/components/schemas/User' }
-                  meta: { $ref: '#/components/schemas/PageMeta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
+                    items: { $ref: "#/components/schemas/User" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /credits/transactions:
     get:
       tags: [users]
       summary: Credit transaction history
       parameters:
-        - { $ref: '#/components/parameters/Page' }
-        - { $ref: '#/components/parameters/PageSize' }
+        - { $ref: "#/components/parameters/Page" }
+        - { $ref: "#/components/parameters/PageSize" }
         - name: type
           in: query
-          schema: { $ref: '#/components/schemas/CreditTransactionType' }
+          schema: { $ref: "#/components/schemas/CreditTransactionType" }
         - name: from
           in: query
-          schema: { $ref: '#/components/schemas/Timestamp' }
+          schema: { $ref: "#/components/schemas/Timestamp" }
         - name: to
           in: query
-          schema: { $ref: '#/components/schemas/Timestamp' }
+          schema: { $ref: "#/components/schemas/Timestamp" }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: OK
           content:
             application/json:
@@ -1596,19 +1812,19 @@ paths:
                 properties:
                   data:
                     type: array
-                    items: { $ref: '#/components/schemas/CreditTransaction' }
-                  meta: { $ref: '#/components/schemas/PageMeta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
+                    items: { $ref: "#/components/schemas/CreditTransaction" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   # ==================== DATASETS ====================
   /datasets:
     get:
       tags: [datasets]
       summary: List datasets
-      description: 'Owner-scoped. Stable sort: created_at DESC, dataset_id DESC.'
+      description: "Owner-scoped. Stable sort: created_at DESC, dataset_id DESC."
       parameters:
-        - { $ref: '#/components/parameters/Page' }
-        - { $ref: '#/components/parameters/PageSize' }
+        - { $ref: "#/components/parameters/Page" }
+        - { $ref: "#/components/parameters/PageSize" }
         - name: search
           in: query
           description: Case-insensitive substring match on name.
@@ -1618,21 +1834,21 @@ paths:
           description: Repeat the key for multiple values.
           schema:
             type: array
-            items: { $ref: '#/components/schemas/DatasetFormat' }
+            items: { $ref: "#/components/schemas/DatasetFormat" }
         - name: dataset_role
           in: query
           schema:
             type: array
-            items: { $ref: '#/components/schemas/DatasetRole' }
+            items: { $ref: "#/components/schemas/DatasetRole" }
         - name: source
           in: query
-          schema: { $ref: '#/components/schemas/DatasetSource' }
+          schema: { $ref: "#/components/schemas/DatasetSource" }
         - name: status
           in: query
-          schema: { $ref: '#/components/schemas/DatasetStatus' }
+          schema: { $ref: "#/components/schemas/DatasetStatus" }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: OK
           content:
             application/json:
@@ -1643,10 +1859,10 @@ paths:
                 properties:
                   data:
                     type: array
-                    items: { $ref: '#/components/schemas/Dataset' }
-                  meta: { $ref: '#/components/schemas/PageMeta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+                    items: { $ref: "#/components/schemas/Dataset" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
     post:
       tags: [datasets]
       summary: Upload a small dataset directly (<= 100 MB)
@@ -1663,11 +1879,11 @@ paths:
               properties:
                 file: { type: string, format: binary }
                 name: { type: string }
-                dataset_format: { $ref: '#/components/schemas/DatasetFormat' }
-                dataset_role: { $ref: '#/components/schemas/DatasetRole' }
+                dataset_format: { $ref: "#/components/schemas/DatasetFormat" }
+                dataset_role: { $ref: "#/components/schemas/DatasetRole" }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '202':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "202":
           description: Accepted; dataset returns with status=processing while validating.
           content:
             application/json:
@@ -1681,19 +1897,19 @@ paths:
                     required: [dataset]
                     additionalProperties: false
                     properties:
-                      dataset: { $ref: '#/components/schemas/Dataset' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403':
+                      dataset: { $ref: "#/components/schemas/Dataset" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
           description: Storage quota exceeded (STORAGE_QUOTA_EXCEEDED).
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponse' }
-        '413':
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "413":
           description: File exceeds the direct-upload limit; use /datasets/uploads.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
 
   /datasets/uploads:
     post:
@@ -1703,10 +1919,10 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/CreateUploadRequest' }
+            schema: { $ref: "#/components/schemas/CreateUploadRequest" }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '201':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "201":
           description: Upload URLs issued.
           content:
             application/json:
@@ -1715,14 +1931,14 @@ paths:
                 required: [data, meta]
                 additionalProperties: false
                 properties:
-                  data: { $ref: '#/components/schemas/CreateUploadResponse' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403':
+                  data: { $ref: "#/components/schemas/CreateUploadResponse" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
           description: Storage quota would be exceeded — checked BEFORE issuing URLs.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
 
   /datasets/uploads/{upload_id}/complete:
     post:
@@ -1737,10 +1953,10 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/CompleteUploadRequest' }
+            schema: { $ref: "#/components/schemas/CompleteUploadRequest" }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '202':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "202":
           description: Assembled; validation begins (status=processing).
           content:
             application/json:
@@ -1754,10 +1970,10 @@ paths:
                     required: [dataset]
                     additionalProperties: false
                     properties:
-                      dataset: { $ref: '#/components/schemas/Dataset' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
+                      dataset: { $ref: "#/components/schemas/Dataset" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /datasets/{dataset_id}:
     parameters:
@@ -1769,8 +1985,8 @@ paths:
       tags: [datasets]
       summary: Get a dataset
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: OK
           content:
             application/json:
@@ -1784,10 +2000,10 @@ paths:
                     required: [dataset]
                     additionalProperties: false
                     properties:
-                      dataset: { $ref: '#/components/schemas/Dataset' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
+                      dataset: { $ref: "#/components/schemas/Dataset" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
     patch:
       tags: [datasets]
       summary: Rename a dataset
@@ -1802,8 +2018,8 @@ paths:
               properties:
                 name: { type: string, minLength: 1, maxLength: 255 }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: Updated
           content:
             application/json:
@@ -1817,10 +2033,10 @@ paths:
                     required: [dataset]
                     additionalProperties: false
                     properties:
-                      dataset: { $ref: '#/components/schemas/Dataset' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
+                      dataset: { $ref: "#/components/schemas/Dataset" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
     delete:
       tags: [datasets]
       summary: Delete a dataset
@@ -1829,11 +2045,11 @@ paths:
         non-terminal job references it. Quota is decremented immediately; the object
         is purged by async GC after a retention window.
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '204': { description: Deleted. }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
 
   /datasets/{dataset_id}/download:
     get:
@@ -1850,19 +2066,19 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '302':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "302":
           description: Redirect to a signed storage URL.
           headers:
             Location: { schema: { type: string } }
-            Cache-Control: { schema: { type: string, examples: ['no-store'] } }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409':
+            Cache-Control: { schema: { type: string, examples: ["no-store"] } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
           description: Dataset is not status=ready.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
 
   # ==================== JOBS ====================
   /jobs:
@@ -1870,18 +2086,18 @@ paths:
       tags: [jobs]
       summary: List jobs
       parameters:
-        - { $ref: '#/components/parameters/Page' }
-        - { $ref: '#/components/parameters/PageSize' }
+        - { $ref: "#/components/parameters/Page" }
+        - { $ref: "#/components/parameters/PageSize" }
         - name: service
           in: query
           schema:
             type: array
-            items: { $ref: '#/components/schemas/ServiceName' }
+            items: { $ref: "#/components/schemas/ServiceName" }
         - name: status
           in: query
           schema:
             type: array
-            items: { $ref: '#/components/schemas/JobStatus' }
+            items: { $ref: "#/components/schemas/JobStatus" }
         - name: job_ids
           in: query
           description: Bulk fetch so a dashboard polls once, not once per job.
@@ -1889,8 +2105,8 @@ paths:
             type: array
             items: { type: string, format: uuid }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: OK
           content:
             application/json:
@@ -1901,9 +2117,9 @@ paths:
                 properties:
                   data:
                     type: array
-                    items: { $ref: '#/components/schemas/Job' }
-                  meta: { $ref: '#/components/schemas/PageMeta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
+                    items: { $ref: "#/components/schemas/Job" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
     post:
       tags: [jobs]
       summary: Create a job (draft by default)
@@ -1912,16 +2128,16 @@ paths:
         so this can return 402. Validates the full per-service shape, including 3D
         Reconstruction's elevation_source -> required-inputs rule.
       parameters:
-        - { $ref: '#/components/parameters/IdempotencyKey' }
-        - { $ref: '#/components/parameters/RequestId' }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/RequestId" }
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/CreateJobRequest' }
+            schema: { $ref: "#/components/schemas/CreateJobRequest" }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '201':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "201":
           description: Created.
           content:
             application/json:
@@ -1935,13 +2151,13 @@ paths:
                     required: [job]
                     additionalProperties: false
                     properties:
-                      job: { $ref: '#/components/schemas/Job' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '402': { $ref: '#/components/responses/PaymentRequired' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+                      job: { $ref: "#/components/schemas/Job" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "402": { $ref: "#/components/responses/PaymentRequired" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
 
   /jobs/{job_id}:
     parameters:
@@ -1954,8 +2170,8 @@ paths:
       summary: Get a job
       description: Supports ETag / If-None-Match so progress polling is cheap.
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: OK
           headers:
             ETag: { schema: { type: string } }
@@ -1971,11 +2187,11 @@ paths:
                     required: [job]
                     additionalProperties: false
                     properties:
-                      job: { $ref: '#/components/schemas/Job' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '304': { description: Not modified. }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
+                      job: { $ref: "#/components/schemas/Job" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "304": { description: Not modified. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
     patch:
       tags: [jobs]
       summary: Edit a draft job
@@ -1991,10 +2207,10 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/CreateJobRequest' }
+            schema: { $ref: "#/components/schemas/CreateJobRequest" }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: Updated
           content:
             application/json:
@@ -2008,23 +2224,23 @@ paths:
                     required: [job]
                     additionalProperties: false
                     properties:
-                      job: { $ref: '#/components/schemas/Job' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '412': { description: Precondition failed (concurrent edit). }
-        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+                      job: { $ref: "#/components/schemas/Job" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "412": { description: Precondition failed (concurrent edit). }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
     delete:
       tags: [jobs]
       summary: Delete a draft job
       description: Drafts only; 409 JOB_NOT_DELETABLE otherwise.
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '204': { description: Deleted. }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
 
   /jobs/{job_id}/estimate:
     post:
@@ -2041,8 +2257,8 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: OK
           content:
             application/json:
@@ -2051,11 +2267,11 @@ paths:
                 required: [data, meta]
                 additionalProperties: false
                 properties:
-                  data: { $ref: '#/components/schemas/EstimateResponse' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+                  data: { $ref: "#/components/schemas/EstimateResponse" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
 
   /jobs/{job_id}/submit:
     post:
@@ -2070,10 +2286,10 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid }
-        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: Queued.
           content:
             application/json:
@@ -2087,13 +2303,13 @@ paths:
                     required: [job]
                     additionalProperties: false
                     properties:
-                      job: { $ref: '#/components/schemas/Job' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '402': { $ref: '#/components/responses/PaymentRequired' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+                      job: { $ref: "#/components/schemas/Job" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "402": { $ref: "#/components/responses/PaymentRequired" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
 
   /jobs/{job_id}/cancel:
     post:
@@ -2110,8 +2326,8 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: Cancelled.
           content:
             application/json:
@@ -2125,11 +2341,11 @@ paths:
                     required: [job]
                     additionalProperties: false
                     properties:
-                      job: { $ref: '#/components/schemas/Job' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
+                      job: { $ref: "#/components/schemas/Job" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
 
   /jobs/{job_id}/retry:
     post:
@@ -2142,8 +2358,8 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '201':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "201":
           description: New draft created.
           content:
             application/json:
@@ -2157,11 +2373,11 @@ paths:
                     required: [job]
                     additionalProperties: false
                     properties:
-                      job: { $ref: '#/components/schemas/Job' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
+                      job: { $ref: "#/components/schemas/Job" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
 
   /jobs/{job_id}/events:
     get:
@@ -2177,14 +2393,14 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: text/event-stream
           content:
             text/event-stream:
               schema: { type: string }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /jobs/{job_id}/logs:
     get:
@@ -2197,13 +2413,13 @@ paths:
           schema: { type: string, format: uuid }
         - name: since
           in: query
-          schema: { $ref: '#/components/schemas/Timestamp' }
+          schema: { $ref: "#/components/schemas/Timestamp" }
         - name: level
           in: query
           schema: { type: string, enum: [debug, info, warning, error] }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: OK
           content:
             application/json:
@@ -2219,12 +2435,13 @@ paths:
                       required: [timestamp, level, message]
                       additionalProperties: false
                       properties:
-                        timestamp: { $ref: '#/components/schemas/Timestamp' }
-                        level: { type: string, enum: [debug, info, warning, error] }
+                        timestamp: { $ref: "#/components/schemas/Timestamp" }
+                        level:
+                          { type: string, enum: [debug, info, warning, error] }
                         message: { type: string }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   # ==================== NOTIFICATIONS ====================
   /notifications:
@@ -2232,14 +2449,14 @@ paths:
       tags: [notifications]
       summary: List notifications
       parameters:
-        - { $ref: '#/components/parameters/Page' }
-        - { $ref: '#/components/parameters/PageSize' }
+        - { $ref: "#/components/parameters/Page" }
+        - { $ref: "#/components/parameters/PageSize" }
         - name: read
           in: query
           schema: { type: boolean }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: OK. meta carries unread_count for the bell badge.
           content:
             application/json:
@@ -2250,22 +2467,31 @@ paths:
                 properties:
                   data:
                     type: array
-                    items: { $ref: '#/components/schemas/Notification' }
+                    items: { $ref: "#/components/schemas/Notification" }
                   meta:
                     # PageMeta + unread_count, restated because PageMeta is closed
                     # and cannot be allOf-extended (see PageMeta's description).
                     type: object
-                    required: [request_id, timestamp, total, page, page_size, total_pages, unread_count]
+                    required:
+                      [
+                        request_id,
+                        timestamp,
+                        total,
+                        page,
+                        page_size,
+                        total_pages,
+                        unread_count,
+                      ]
                     additionalProperties: false
                     properties:
                       request_id: { type: string }
-                      timestamp: { $ref: '#/components/schemas/Timestamp' }
+                      timestamp: { $ref: "#/components/schemas/Timestamp" }
                       total: { type: integer, minimum: 0 }
                       page: { type: integer, minimum: 1 }
                       page_size: { type: integer, minimum: 1 }
                       total_pages: { type: integer, minimum: 0 }
                       unread_count: { type: integer, minimum: 0 }
-        '401': { $ref: '#/components/responses/Unauthorized' }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /notifications/read-all:
     post:
@@ -2280,10 +2506,10 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                before: { $ref: '#/components/schemas/Timestamp' }
+                before: { $ref: "#/components/schemas/Timestamp" }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: OK
           content:
             application/json:
@@ -2298,8 +2524,8 @@ paths:
                     additionalProperties: false
                     properties:
                       updated_count: { type: integer, minimum: 0 }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /notifications/{notification_id}:
     parameters:
@@ -2321,8 +2547,8 @@ paths:
               properties:
                 read: { type: boolean }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: Updated
           content:
             application/json:
@@ -2336,18 +2562,19 @@ paths:
                     required: [notification]
                     additionalProperties: false
                     properties:
-                      notification: { $ref: '#/components/schemas/Notification' }
-                  meta: { $ref: '#/components/schemas/Meta' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
+                      notification:
+                        { $ref: "#/components/schemas/Notification" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
     delete:
       tags: [notifications]
       summary: Delete a notification
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '204': { description: Deleted. }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   # ==================== INTERNAL: gateway -> service ====================
   # Every AI/utility service MUST implement these five operations identically.
@@ -2359,28 +2586,28 @@ paths:
       summary: Submit a job to a service
       security: [{ internalServiceToken: [] }]
       parameters:
-        - { $ref: '#/components/parameters/ServicePathSegment' }
-        - { $ref: '#/components/parameters/RequestId' }
+        - { $ref: "#/components/parameters/ServicePathSegment" }
+        - { $ref: "#/components/parameters/RequestId" }
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/InternalJobRequest' }
+            schema: { $ref: "#/components/schemas/InternalJobRequest" }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '202':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "202":
           description: Accepted and queued for processing.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/InternalJobAccepted' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '409':
+              schema: { $ref: "#/components/schemas/InternalJobAccepted" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
           description: A job with this job_id was already accepted (idempotent replay).
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponse' }
-        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
 
   /internal/{service}/jobs/{job_id}:
     delete:
@@ -2392,16 +2619,16 @@ paths:
         worker keeps burning GPU (CONTRACT-CHANGES B2).
       security: [{ internalServiceToken: [] }]
       parameters:
-        - { $ref: '#/components/parameters/ServicePathSegment' }
+        - { $ref: "#/components/parameters/ServicePathSegment" }
         - name: job_id
           in: path
           required: true
           schema: { type: string, format: uuid }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '202': { description: Cancellation accepted. }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "202": { description: Cancellation accepted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /internal/{service}/jobs/{job_id}/status:
     get:
@@ -2410,20 +2637,20 @@ paths:
       description: Used by the gateway's reaper to detect dead workers.
       security: [{ internalServiceToken: [] }]
       parameters:
-        - { $ref: '#/components/parameters/ServicePathSegment' }
+        - { $ref: "#/components/parameters/ServicePathSegment" }
         - name: job_id
           in: path
           required: true
           schema: { type: string, format: uuid }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: OK
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/InternalJobStatus' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
+              schema: { $ref: "#/components/schemas/InternalJobStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /internal/{service}/estimate:
     post:
@@ -2432,21 +2659,21 @@ paths:
       description: The single source of pricing truth for this service.
       security: [{ internalServiceToken: [] }]
       parameters:
-        - { $ref: '#/components/parameters/ServicePathSegment' }
+        - { $ref: "#/components/parameters/ServicePathSegment" }
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/InternalEstimateRequest' }
+            schema: { $ref: "#/components/schemas/InternalEstimateRequest" }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: OK
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/EstimateResponse' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+              schema: { $ref: "#/components/schemas/EstimateResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
 
   /internal/{service}/capabilities:
     get:
@@ -2454,15 +2681,15 @@ paths:
       summary: Service capabilities
       security: [{ internalServiceToken: [] }]
       parameters:
-        - { $ref: '#/components/parameters/ServicePathSegment' }
+        - { $ref: "#/components/parameters/ServicePathSegment" }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: OK
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ServiceCapabilities' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
+              schema: { $ref: "#/components/schemas/ServiceCapabilities" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   # ==================== INTERNAL: service -> gateway ====================
   /internal/jobs/{job_id}/callback:
@@ -2478,30 +2705,30 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid }
-        - { $ref: '#/components/parameters/RequestId' }
+        - { $ref: "#/components/parameters/RequestId" }
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/JobCallback' }
+            schema: { $ref: "#/components/schemas/JobCallback" }
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: |
             Acknowledged. Any non-200 means the service MUST retry with backoff.
             Stale/duplicate callbacks also return 200 (they are intentionally dropped),
             so a service never retries forever on an already-handled event.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/JobCallbackAck' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403':
+              schema: { $ref: "#/components/schemas/JobCallbackAck" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
           description: Calling service does not own this job.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponse' }
-        '404': { $ref: '#/components/responses/NotFound' }
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   # ==================== HEALTH (every service AND the gateway) ====================
   /health:
@@ -2510,12 +2737,12 @@ paths:
       summary: Liveness
       security: []
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: Process is alive.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/HealthResponse' }
+              schema: { $ref: "#/components/schemas/HealthResponse" }
 
   /ready:
     get:
@@ -2524,14 +2751,14 @@ paths:
       description: Dependencies reachable — storage, DB/queue, model weights loaded, GPU present.
       security: []
       responses:
-        default: { $ref: '#/components/responses/UnexpectedError' }
-        '200':
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "200":
           description: Ready to accept work.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/HealthResponse' }
-        '503':
+              schema: { $ref: "#/components/schemas/HealthResponse" }
+        "503":
           description: Not ready.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/HealthResponse' }
+              schema: { $ref: "#/components/schemas/HealthResponse" }
