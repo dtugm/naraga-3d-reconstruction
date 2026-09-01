@@ -41,7 +41,7 @@ from .store import StateStore
 log = logging.getLogger(__name__)
 
 PREFIX = "/v1/internal/reconstruction-3d"
-CONTRACT_VERSION = "1.0.0"  # tests assert this matches contract/openapi.yaml
+CONTRACT_VERSION = "1.0.1"  # tests assert this matches contract/openapi.yaml
 MODELS: list[str] = ["dream3d", "cascade_mesh"]
 OUTPUT_FORMATS: list[str] = ["gltf", "3dtiles"]
 MAX_INPUT_SIZE_BYTES = 10 * 2**30  # 10 GiB placeholder — tune per real model limits

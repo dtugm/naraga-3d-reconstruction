@@ -54,7 +54,7 @@ class Bbox(RootModel[tuple[BboxItem, BboxItem1, BboxItem2, BboxItem3]]):
 class Crs(RootModel[str]):
     root: str = Field(
         ...,
-        description='Authority:code form only. Not WKT, not a bare integer.',
+        description="Authority:code form only. Not WKT, not a bare integer.\nCase-sensitive: 'EPSG', never 'epsg' (the pattern already enforces this).\n",
         examples=['EPSG:4326', 'EPSG:32749'],
         pattern='^EPSG:[0-9]{4,6}$',
     )
