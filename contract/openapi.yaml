@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: NARAGA API
-  version: 1.0.1
-  x-contract-version: 1.0.1
+  version: 2.0.0
+  x-contract-version: 2.0.0
   description: |
     Canonical, machine-readable contract for NARAGA — AI-powered geospatial processing.
 
@@ -314,6 +314,7 @@ components:
           name,
           organization_id,
           role,
+          email_verified,
           credits_remaining,
           storage_used_bytes,
           storage_quota_bytes,
@@ -330,6 +331,12 @@ components:
           format: uuid
           description: Never null — a personal org is created at registration.
         role: { $ref: "#/components/schemas/UserRole" }
+        email_verified:
+          type: boolean
+          description: |
+            True once the address is confirmed via /auth/verify-email. Login is NOT
+            blocked while false — gating features on verification is a product
+            decision that belongs to consumers, not this contract.
         credits_remaining: { type: integer, minimum: 0 }
         storage_used_bytes: { type: integer, minimum: 0, format: int64 }
         storage_quota_bytes:
@@ -362,6 +369,36 @@ components:
         access_token_expires_at: { $ref: "#/components/schemas/Timestamp" }
         refresh_token_expires_at: { $ref: "#/components/schemas/Timestamp" }
         user_agent: { type: string }
+        created_at: { $ref: "#/components/schemas/Timestamp" }
+
+    SessionInfo:
+      type: object
+      description: |
+        A session as listed by GET /sessions. Deliberately NOT the Session schema:
+        an access token exists only in the response that minted it and can never be
+        returned for a list — v1's reuse of Session made the endpoint
+        unimplementable. `current` and `last_used_at` are what make a session list
+        actionable ("which one is this device, which one do I revoke?").
+      required:
+        [
+          session_id,
+          user_id,
+          refresh_token_expires_at,
+          user_agent,
+          current,
+          last_used_at,
+          created_at,
+        ]
+      additionalProperties: false
+      properties:
+        session_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        refresh_token_expires_at: { $ref: "#/components/schemas/Timestamp" }
+        user_agent: { type: string }
+        current:
+          type: boolean
+          description: True for the session whose access token made this request.
+        last_used_at: { $ref: "#/components/schemas/Timestamp" }
         created_at: { $ref: "#/components/schemas/Timestamp" }
 
     Dataset:
@@ -1000,6 +1037,38 @@ components:
       properties:
         all_devices: { type: boolean, default: false }
 
+    ForgotPasswordRequest:
+      type: object
+      required: [email]
+      additionalProperties: false
+      properties:
+        email: { type: string, format: email }
+
+    ResetPasswordRequest:
+      type: object
+      required: [token, password]
+      additionalProperties: false
+      properties:
+        token:
+          type: string
+          minLength: 1
+          description: Single-use opaque token from the reset email. 30-minute TTL.
+        password:
+          type: string
+          minLength: 12
+          maxLength: 256
+          description: Same policy as registration, including the common-password denylist.
+
+    VerifyEmailRequest:
+      type: object
+      required: [token]
+      additionalProperties: false
+      properties:
+        token:
+          type: string
+          minLength: 1
+          description: Single-use opaque token from the verification email. 24-hour TTL.
+
     UpdateUserRequest:
       type: object
       additionalProperties: false
@@ -1591,6 +1660,85 @@ paths:
         "204": { description: Logged out. }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /auth/forgot-password:
+    post:
+      tags: [auth]
+      summary: Request a password-reset email
+      description: |
+        ALWAYS 204, whether or not the email belongs to an account, and with the
+        same response timing (the gateway issues the token out-of-band). Any
+        divergence — status, message, or latency — is an account-existence oracle.
+      security: []
+      parameters: [{ $ref: "#/components/parameters/RequestId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ForgotPasswordRequest" }
+      responses:
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "204": { description: Accepted. A reset email is sent iff the account exists. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auth/reset-password:
+    post:
+      tags: [auth]
+      summary: Set a new password with an emailed token
+      description: |
+        Consumes the token atomically (single use) and revokes EVERY session of the
+        user — the token arrived by email, so the account's sessions cannot be
+        trusted. Unknown, expired and already-used tokens all return the same 400.
+        Already-issued access tokens remain valid until they expire (same rule as
+        logout).
+      security: []
+      parameters: [{ $ref: "#/components/parameters/RequestId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResetPasswordRequest" }
+      responses:
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "204": { description: Password changed; all sessions revoked. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auth/verify-email:
+    post:
+      tags: [auth]
+      summary: Confirm an email address
+      description: |
+        Consumes the token atomically (single use) and sets `email_verified`.
+        Unknown, expired and already-used tokens all return the same 400.
+      security: []
+      parameters: [{ $ref: "#/components/parameters/RequestId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VerifyEmailRequest" }
+      responses:
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "204": { description: Email verified. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auth/resend-verification:
+    post:
+      tags: [auth]
+      summary: Re-send the verification email
+      description: |
+        For the authenticated user. 400 when the email is already verified.
+        Re-issuing retires any previously issued verification token.
+      parameters: [{ $ref: "#/components/parameters/RequestId" }]
+      responses:
+        default: { $ref: "#/components/responses/UnexpectedError" }
+        "204": { description: Verification email sent. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
   /sessions:
     get:
       tags: [auth]
@@ -1608,7 +1756,7 @@ paths:
                 properties:
                   data:
                     type: array
-                    items: { $ref: "#/components/schemas/Session" }
+                    items: { $ref: "#/components/schemas/SessionInfo" }
                   meta: { $ref: "#/components/schemas/Meta" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
