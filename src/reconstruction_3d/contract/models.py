@@ -266,6 +266,10 @@ class User(BaseModel):
         ..., description='Never null — a personal org is created at registration.'
     )
     role: UserRole
+    email_verified: bool = Field(
+        ...,
+        description='True once the address is confirmed via /auth/verify-email. Login is NOT\nblocked while false — gating features on verification is a product\ndecision that belongs to consumers, not this contract.\n',
+    )
     credits_remaining: int = Field(..., ge=0)
     storage_used_bytes: int = Field(..., ge=0)
     storage_quota_bytes: int = Field(..., ge=0)
@@ -290,6 +294,30 @@ class Session(BaseModel):
     access_token_expires_at: Timestamp
     refresh_token_expires_at: Timestamp
     user_agent: str
+    created_at: Timestamp
+
+
+class SessionInfo(BaseModel):
+    """
+    A session as listed by GET /sessions. Deliberately NOT the Session schema:
+    an access token exists only in the response that minted it and can never be
+    returned for a list — v1's reuse of Session made the endpoint
+    unimplementable. `current` and `last_used_at` are what make a session list
+    actionable ("which one is this device, which one do I revoke?").
+
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: UUID
+    user_id: UUID
+    refresh_token_expires_at: Timestamp
+    user_agent: str
+    current: bool = Field(
+        ..., description='True for the session whose access token made this request.'
+    )
+    last_used_at: Timestamp
     created_at: Timestamp
 
 
@@ -850,6 +878,41 @@ class LogoutRequest(BaseModel):
         extra='forbid',
     )
     all_devices: bool | None = False
+
+
+class ForgotPasswordRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    token: str = Field(
+        ...,
+        description='Single-use opaque token from the reset email. 30-minute TTL.',
+        min_length=1,
+    )
+    password: str = Field(
+        ...,
+        description='Same policy as registration, including the common-password denylist.',
+        max_length=256,
+        min_length=12,
+    )
+
+
+class VerifyEmailRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    token: str = Field(
+        ...,
+        description='Single-use opaque token from the verification email. 24-hour TTL.',
+        min_length=1,
+    )
 
 
 class UpdateUserRequest(BaseModel):
