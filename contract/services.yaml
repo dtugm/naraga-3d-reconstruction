@@ -17,7 +17,7 @@ services:
     port: 8082
     repo: naraga-pointcloud-classification
     python_package: pointcloud_classification
-    models: [csf, dgcnn]
+    models: [csf, ptv3]
     output_formats: [las, laz, 3dtiles, geotiff]
   landcover_detection:
     path_segment: landcover-detection

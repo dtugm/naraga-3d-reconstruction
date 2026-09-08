@@ -447,7 +447,7 @@ class BuildingExtractionResult(BaseModel):
 
 class Model1(StrEnum):
     csf = 'csf'
-    dgcnn = 'dgcnn'
+    ptv3 = 'ptv3'
 
 
 class OutputFormat1(StrEnum):
@@ -499,7 +499,7 @@ class PointCloudClassificationResult(BaseModel):
     points_total: int = Field(..., ge=0)
     points_by_class: dict[str, PointsByClass] = Field(
         ...,
-        description="Keyed map, not a fixed struct: `csf` (a ground filter) and `dgcnn` (a learned\nclassifier) emit DIFFERENT class sets. Counts MUST sum to points_total.\nDiscover a model's classes at runtime via /capabilities rather than\nhardcoding keys in the UI.\n",
+        description="Keyed map, not a fixed struct: `csf` (a ground filter) and `ptv3` (a learned\nclassifier) emit DIFFERENT class sets. Counts MUST sum to points_total.\nDiscover a model's classes at runtime via /capabilities rather than\nhardcoding keys in the UI.\n",
         examples=[{'ground': 120, 'vegetation': 80, 'building': 40, 'unclassified': 5}],
     )
     output_formats_generated: list[OutputFormatsGeneratedEnum1]
@@ -711,7 +711,7 @@ class BuildingExtractionJob(JobBase):
 
 class Model4(StrEnum):
     csf = 'csf'
-    dgcnn = 'dgcnn'
+    ptv3 = 'ptv3'
 
 
 class PointCloudClassificationJob(JobBase):
@@ -936,6 +936,11 @@ class CreateUploadRequest(BaseModel):
     (CONTRACT-CHANGES D7). size_bytes is checked against remaining quota BEFORE
     any URL is issued.
 
+    crs/bbox are DECLARED by the uploader: the gateway has no geospatial stack,
+    so it records them as given and the dataset becomes `ready` on completion.
+    Deep validation happens the first time a job consumes the dataset — a wrong
+    declaration surfaces there (e.g. CRS_MISMATCH), not at upload.
+
     """
 
     model_config = ConfigDict(
@@ -946,6 +951,8 @@ class CreateUploadRequest(BaseModel):
     dataset_role: DatasetRole | None = None
     size_bytes: int = Field(..., ge=1)
     content_type: str | None = None
+    crs: Crs
+    bbox: Bbox | None = None
 
 
 class Method(StrEnum):
@@ -1014,7 +1021,7 @@ class CreateBuildingExtractionJobRequest(CreateJobRequestBase):
 
 class Model7(StrEnum):
     csf = 'csf'
-    dgcnn = 'dgcnn'
+    ptv3 = 'ptv3'
 
 
 class CreatePointCloudClassificationJobRequest(CreateJobRequestBase):
