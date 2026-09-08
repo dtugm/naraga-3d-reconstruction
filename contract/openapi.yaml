@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: NARAGA API
-  version: 2.0.0
-  x-contract-version: 2.0.0
+  version: 2.1.0
+  x-contract-version: 2.1.0
   description: |
     Canonical, machine-readable contract for NARAGA — AI-powered geospatial processing.
 
@@ -584,7 +584,7 @@ components:
       required: [model, output_formats]
       additionalProperties: false
       properties:
-        model: { type: string, enum: [csf, dgcnn] }
+        model: { type: string, enum: [csf, ptv3] }
         output_formats:
           type: array
           minItems: 1
@@ -614,7 +614,7 @@ components:
         points_by_class:
           type: object
           description: |
-            Keyed map, not a fixed struct: `csf` (a ground filter) and `dgcnn` (a learned
+            Keyed map, not a fixed struct: `csf` (a ground filter) and `ptv3` (a learned
             classifier) emit DIFFERENT class sets. Counts MUST sum to points_total.
             Discover a model's classes at runtime via /capabilities rather than
             hardcoding keys in the UI.
@@ -844,7 +844,7 @@ components:
           required: [service, model, input_dataset_ids, params, result_summary]
           properties:
             service: { type: string, const: pointcloud_classification }
-            model: { type: string, enum: [csf, dgcnn] }
+            model: { type: string, enum: [csf, ptv3] }
             input_dataset_ids:
               { $ref: "#/components/schemas/PointCloudClassificationInputs" }
             params:
@@ -1090,7 +1090,12 @@ components:
         POST cannot carry the multi-GB LAS/LAZ files this platform exists to process
         (CONTRACT-CHANGES D7). size_bytes is checked against remaining quota BEFORE
         any URL is issued.
-      required: [name, dataset_format, size_bytes]
+
+        crs/bbox are DECLARED by the uploader: the gateway has no geospatial stack,
+        so it records them as given and the dataset becomes `ready` on completion.
+        Deep validation happens the first time a job consumes the dataset — a wrong
+        declaration surfaces there (e.g. CRS_MISMATCH), not at upload.
+      required: [name, dataset_format, size_bytes, crs]
       additionalProperties: false
       properties:
         name: { type: string, minLength: 1, maxLength: 255 }
@@ -1100,6 +1105,8 @@ components:
             [{ $ref: "#/components/schemas/DatasetRole" }, { type: "null" }]
         size_bytes: { type: integer, minimum: 1, format: int64 }
         content_type: { type: string }
+        crs: { $ref: "#/components/schemas/Crs" }
+        bbox: { $ref: "#/components/schemas/Bbox" }
 
     CreateUploadResponse:
       type: object
@@ -1192,7 +1199,7 @@ components:
           additionalProperties: false
           properties:
             service: { type: string, const: pointcloud_classification }
-            model: { type: string, enum: [csf, dgcnn] }
+            model: { type: string, enum: [csf, ptv3] }
             job_name: { type: string }
             save_as_draft: { type: boolean }
             input_dataset_ids:
@@ -2017,22 +2024,25 @@ paths:
       description: |
         Simple path for small files only. Anything larger MUST use the presigned flow
         at /datasets/uploads — a single multipart POST cannot carry a multi-GB LAS file.
+        crs is DECLARED by the uploader (see CreateUploadRequest); the dataset may
+        return already `ready`.
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
               type: object
-              required: [file, name, dataset_format]
+              required: [file, name, dataset_format, crs]
               properties:
                 file: { type: string, format: binary }
                 name: { type: string }
                 dataset_format: { $ref: "#/components/schemas/DatasetFormat" }
+                crs: { $ref: "#/components/schemas/Crs" }
                 dataset_role: { $ref: "#/components/schemas/DatasetRole" }
       responses:
         default: { $ref: "#/components/responses/UnexpectedError" }
         "202":
-          description: Accepted; dataset returns with status=processing while validating.
+          description: Accepted. With declared crs the dataset may already be `ready`; `processing` is reserved for future inspection flows.
           content:
             application/json:
               schema:
@@ -2105,7 +2115,7 @@ paths:
       responses:
         default: { $ref: "#/components/responses/UnexpectedError" }
         "202":
-          description: Assembled; validation begins (status=processing).
+          description: Assembled. With declared crs the dataset may already be `ready`; `processing` is reserved for future inspection flows.
           content:
             application/json:
               schema:
