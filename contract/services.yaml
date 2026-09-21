@@ -9,7 +9,7 @@ services:
     port: 8081
     repo: naraga-building-extraction
     python_package: building_extraction
-    models: [cascade_building, geocarta]
+    models: [sam_yolo, unet]
     output_formats: [geojson, pmtiles]
   pointcloud_classification:
     path_segment: pointcloud-classification

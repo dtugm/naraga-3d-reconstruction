@@ -542,7 +542,7 @@ components:
       required: [model, output_formats]
       additionalProperties: false
       properties:
-        model: { type: string, enum: [cascade_building, geocarta] }
+        model: { type: string, enum: [sam_yolo, unet] }
         output_formats:
           type: array
           minItems: 1
@@ -825,7 +825,7 @@ components:
           required: [service, model, input_dataset_ids, params, result_summary]
           properties:
             service: { type: string, const: building_extraction }
-            model: { type: string, enum: [cascade_building, geocarta] }
+            model: { type: string, enum: [sam_yolo, unet] }
             input_dataset_ids:
               { $ref: "#/components/schemas/BuildingExtractionInputs" }
             params: { $ref: "#/components/schemas/BuildingExtractionParams" }
@@ -1184,7 +1184,7 @@ components:
           additionalProperties: false
           properties:
             service: { type: string, const: building_extraction }
-            model: { type: string, enum: [cascade_building, geocarta] }
+            model: { type: string, enum: [sam_yolo, unet] }
             job_name: { type: string }
             save_as_draft: { type: boolean }
             input_dataset_ids:

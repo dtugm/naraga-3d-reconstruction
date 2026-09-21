@@ -405,8 +405,8 @@ class Notification(BaseModel):
 
 
 class Model(StrEnum):
-    cascade_building = 'cascade_building'
-    geocarta = 'geocarta'
+    sam_yolo = 'sam_yolo'
+    unet = 'unet'
 
 
 class OutputFormat(StrEnum):
@@ -694,8 +694,8 @@ class Service(StrEnum):
 
 
 class Model3(StrEnum):
-    cascade_building = 'cascade_building'
-    geocarta = 'geocarta'
+    sam_yolo = 'sam_yolo'
+    unet = 'unet'
 
 
 class BuildingExtractionJob(JobBase):
@@ -1003,8 +1003,8 @@ class CreateJobRequestBase(BaseModel):
 
 
 class Model6(StrEnum):
-    cascade_building = 'cascade_building'
-    geocarta = 'geocarta'
+    sam_yolo = 'sam_yolo'
+    unet = 'unet'
 
 
 class CreateBuildingExtractionJobRequest(CreateJobRequestBase):
