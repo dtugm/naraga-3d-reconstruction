@@ -40,3 +40,5 @@ outputs/
 .DS_Store
 .idea/
 *.swp
+
+CLAUDE.local.md

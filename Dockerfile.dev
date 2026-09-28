@@ -18,9 +18,11 @@ RUN micromamba install -y -n base -c conda-forge \
 
 # src/ is bind-mounted over this at runtime; installing it here just resolves the
 # dependencies from pyproject. PYTHONPATH makes the mounted code importable.
+# '.[geo]' to match the prod Dockerfile: cascade_mesh imports geopandas/rasterio/etc.,
+# and without the extra every such job fails here with ModuleNotFoundError.
 COPY --chown=$MAMBA_USER:$MAMBA_USER pyproject.toml ./
 COPY --chown=$MAMBA_USER:$MAMBA_USER src ./src
-RUN micromamba run -n base python -m pip install --no-cache-dir -e .
+RUN micromamba run -n base python -m pip install --no-cache-dir -e '.[geo]'
 
 # Durable job state (SQLite) lives here; compose mounts a volume over it.
 RUN mkdir -p /app/data

@@ -13,15 +13,21 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Heavy geo/ML wheels live here so `uv sync` stays fast for anyone touching only the
+# Heavy geo wheels live here so `uv sync` stays fast for anyone touching only the
 # API layer. Install with: uv sync --extra geo
+#
+# Matches what the reference pipelines actually use (see CLAUDE.md "Referensi pipeline"):
+# cascade_mesh (LOD2, sam-interactive-github/ai/lod_generation) needs fiona/geopandas/shapely
+# on top of rasterio/pyproj; dream3d (DREAM3DCITY-Cloud/src/core/reconstruction.py) shells out
+# to the Geoflow binary and only touches laspy/fiona for point-cloud/footprint IO around it.
+# Neither pipeline uses torch/open3d/trimesh — dropped rather than kept as unused placeholders.
 geo = [
-    "torch>=2.5",
-    "open3d>=0.18",
-    "trimesh>=4.5",
     "laspy[laszip]>=2.5",
     "rasterio>=1.4",
     "pyproj>=3.7",
+    "fiona>=1.9",
+    "geopandas>=1.0",
+    "shapely>=2.0",
 ]
 
 [dependency-groups]
@@ -61,8 +67,8 @@ module = ["reconstruction_3d.contract.models"]
 follow_imports = "skip"
 
 [[tool.mypy.overrides]]
-# Geo/ML libs ship no type stubs.
-module = ["osgeo.*", "pdal.*", "laspy.*", "open3d.*", "rasterio.*", "torch.*", "geopandas.*", "shapely.*", "pyproj.*"]
+# Geo libs ship no type stubs.
+module = ["osgeo.*", "pdal.*", "laspy.*", "rasterio.*", "fiona.*", "geopandas.*", "shapely.*", "pyproj.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
