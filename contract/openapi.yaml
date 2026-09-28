@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: NARAGA API
-  version: 2.1.0
-  x-contract-version: 2.1.0
+  version: 3.0.0
+  x-contract-version: 3.0.0
   description: |
     Canonical, machine-readable contract for NARAGA — AI-powered geospatial processing.
 
@@ -170,6 +170,7 @@ components:
           obj,
           xyz,
           ply,
+          cityjson,
         ]
 
     DatasetRole:
@@ -188,6 +189,7 @@ components:
           landcover,
           mesh,
           aoi,
+          roof_structure,
         ]
 
     DatasetSource:
@@ -706,7 +708,7 @@ components:
         point_cloud: { type: string, format: uuid }
         dtm: { type: string, format: uuid }
         dsm: { type: string, format: uuid }
-        remote_sensing: { type: string, format: uuid }
+        roof_structure: { type: string, format: uuid }
       x-cross-field-validation: |
         Which inputs are required depends on params.elevation_source, which lives in a
         SIBLING object — JSON Schema cannot express a constraint across siblings, so no
