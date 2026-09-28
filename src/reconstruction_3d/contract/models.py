@@ -107,6 +107,7 @@ class DatasetFormat(StrEnum):
     obj = 'obj'
     xyz = 'xyz'
     ply = 'ply'
+    cityjson = 'cityjson'
 
 
 class DatasetRole(StrEnum):
@@ -125,6 +126,7 @@ class DatasetRole(StrEnum):
     landcover = 'landcover'
     mesh = 'mesh'
     aoi = 'aoi'
+    roof_structure = 'roof_structure'
 
 
 class DatasetSource(StrEnum):
@@ -598,7 +600,7 @@ class Reconstruction3dInputs(BaseModel):
     point_cloud: UUID | None = None
     dtm: UUID | None = None
     dsm: UUID | None = None
-    remote_sensing: UUID | None = None
+    roof_structure: UUID | None = None
 
 
 class OutputFormatsGeneratedEnum3(StrEnum):
