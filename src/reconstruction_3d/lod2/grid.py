@@ -202,6 +202,16 @@ class VertexPool:
     def key_at(self, index: int) -> VertexKey:
         return self._keys[index]
 
+    def rollback(self, mark: int) -> None:
+        """Forget every vertex added since len(pool) was `mark`.
+
+        Keys that already existed before `mark` were reused, not appended, so
+        truncating removes exactly the vertices a discarded building introduced.
+        """
+        for key in self._keys[mark:]:
+            del self._index[key]
+        del self._keys[mark:]
+
     def __len__(self) -> int:
         return len(self._keys)
 

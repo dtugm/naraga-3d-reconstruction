@@ -25,6 +25,7 @@ from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.geometry.polygon import orient
 from shapely.ops import polygonize, unary_union
+from shapely.strtree import STRtree
 
 from .grid import Grid
 from .io_vector import snap_geometry
@@ -159,10 +160,28 @@ def _absorb_slivers(faces: list[Face], params: LOD2Params) -> list[Face]:
 
     The face stays in the mesh as its own face -- only its plane assignment
     changes. Merging geometry instead would require re-noding everything.
+
+    Neighbours come from one STRtree and each shared-edge length is computed once:
+    the face polygons never change between passes, only segment assignments do.
+    Candidates are visited in face order, so ties resolve exactly as a full scan would.
     """
+    if not any(f.is_gap for f in faces):
+        return faces
+    polygons = [f.polygon for f in faces]
+    tree = STRtree(polygons)
+    shared_cache: dict[tuple[int, int], float] = {}
+
+    def shared_length(i: int, j: int) -> float:
+        if (i, j) not in shared_cache:
+            try:
+                shared_cache[(i, j)] = float(polygons[i].intersection(polygons[j]).length)
+            except GEOSException:
+                shared_cache[(i, j)] = 0.0
+        return shared_cache[(i, j)]
+
     for _ in range(3):  # a gap may sit next to another gap
         changed = False
-        for face in faces:
+        for i, face in enumerate(faces):
             if not face.is_gap or face.absorbed:
                 continue
             poly = face.polygon
@@ -173,13 +192,11 @@ def _absorb_slivers(faces: list[Face], params: LOD2Params) -> list[Face]:
 
             best_index: int | None = None
             best_shared = 0.0
-            for other in faces:
-                if other is face or other.segment_index is None:
+            for j in sorted(int(k) for k in tree.query(poly, predicate="intersects")):
+                other = faces[j]
+                if j == i or other.segment_index is None:
                     continue
-                try:
-                    shared = float(poly.intersection(other.polygon).length)
-                except GEOSException:
-                    continue
+                shared = shared_length(i, j)
                 if shared > best_shared:
                     best_shared = shared
                     best_index = other.segment_index

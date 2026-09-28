@@ -132,8 +132,13 @@ bangunan), dan `ref.city.json` bila memakai `--ref`.
 `false` bila *salah satu* pemeriksaan gagal, termasuk uji kewajaran volume. Pada data ini,
 bangunan `dcf3f52f…` tertutup secara topologi, tetapi volumenya hanya 0,25× prisma tapak
 (batas bawah 0,4×). Penyebabnya: satu dari empat bidang atapnya gagal di-fit (RMSE 0,82 m,
-jatuh ke fallback) dan bidang-bidangnya berselisih 3,7 m. Bangunan ini **tetap ada di
-output** karena mode default `on_invalid="warn"`. Untuk mengeluarkannya, gunakan `"skip"`.
+jatuh ke fallback) dan bidang-bidangnya berselisih 3,7 m.
+
+Langkah A memakai default library `on_invalid="warn"` (sama dengan referensi, agar paritas
+bisa dibandingkan), sehingga bangunan ini tetap ditulis. **Service memakai `"skip"`**: lewat
+HTTP/Docker (Langkah B) bangunan ini dikeluarkan, sehingga output berisi **152** bangunan
+dan 2588 vertex. Job baru dianggap gagal bila lebih dari separuh bangunan dikeluarkan
+(`MAX_SKIPPED_FRACTION` di `cascade_mesh.py`).
 
 **Bangunan tertinggi (82,6 m, atap datar di z = 122,3 m, tanah 39,7 m).** RMSE bidangnya 0,0
 dan tidak ada perselisihan, jadi konsisten dengan bangunan tinggi sungguhan atau objek dengan
@@ -207,7 +212,7 @@ CALLBACK seq=3 status=processing progress=5
 CALLBACK seq=4 status=processing progress=10
 CALLBACK seq=5 status=processing progress=50
 CALLBACK seq=6 status=processing progress=90
-PUT  output.city.json  164883 bytes
+PUT  output.city.json  163784 bytes
 CALLBACK seq=7 status=complete progress=100
 ```
 
@@ -234,14 +239,16 @@ EOF
 
 Yang diharapkan:
 
-- `1.1  http://www.opengis.net/def/crs/EPSG/0/32749  153 buildings`
+- `1.1  http://www.opengis.net/def/crs/EPSG/0/32749  152 buildings`
 - callback terminal: `complete`, `credits_used = 2`, `result_summary = null`
 - `output_datasets[0]`: `storage_key` diawali `jobs/<job_id>/outputs/`, `size_bytes` sama dengan
-  ukuran file (164883), `dataset_role = "mesh"`, `crs = "EPSG:32749"`,
+  ukuran file (163784), `dataset_role = "mesh"`, `crs = "EPSG:32749"`,
   `dataset_format = "gltf"` (format slot upload: kontrak belum punya `cityjson`)
 
-**Output lewat Docker identik dengan output Langkah A** (sudah dibandingkan: 153 bangunan,
-2605 vertex, `==` pada seluruh dokumen). Bila berbeda, ada yang salah di jalur service
+**Output lewat Docker sama dengan Langkah A dikurangi satu bangunan** yang gagal validasi
+(`dcf3f52f…`), karena service memakai `on_invalid="skip"`. Hasilnya 152 bangunan dan 2588
+vertex, tanpa vertex yatim. Untuk membandingkan byte demi byte, jalankan Langkah A dengan
+`LOD2Params(..., on_invalid="skip")`. Bila berbeda, ada yang salah di jalur service
 (download, upload, atau parameter).
 
 ### B5. Pastikan `/health` tidak terblokir selama job
@@ -297,7 +304,9 @@ Tes otomatis membuktikan topologi tertutup, bukan bahwa model terlihat benar.
 2. Yang dicek:
    - tidak ada atap ganda dan tidak ada lubang di sambungan atap-dinding;
    - dinding courtyard ada pada 23 bangunan berlubang;
-   - bangunan `dcf3f52fe2ff4334aca886a4c041d73e` (volume tak wajar);
+   - bangunan `dcf3f52fe2ff4334aca886a4c041d73e` (volume tak wajar): **tidak ada** di output
+     service (dikeluarkan karena `skip`). Lihat di `data/3d_recon/run_direct/port.city.json`
+     dari Langkah A;
    - bangunan `a4312ef9…` (tertinggi, 82,6 m): apakah memang menara atau derau DSM;
    - lima bangunan dengan `max_z_disagreement` terbesar (lihat `report.json`), mis.
      `aaaabc3b…` (8,26 m).
@@ -339,9 +348,10 @@ for b in sorted(r['buildings'], key=lambda b:-b['max_z_disagreement'])[:10]:
    hilang, dan tidak ada perbedaan geometri dari referensi. Ini bukti terkuat bahwa port setia.
    Satu-satunya beda dari referensi adalah atribut `Id` yang hanya disuntikkan referensi
    (kontrak 3D Viewer Cascade3D, sengaja dibuang di port ini).
-2. **Job tetap `complete` walau ada bangunan yang gagal validasi.** Gateway tidak diberi tahu
-   jumlahnya (`result_summary = null`). Hanya log service yang mencatatnya. Bila gateway perlu
-   tahu, itu harus lewat kontrak (`dtugm/naraga-contract`).
+2. **Bangunan yang gagal validasi dikeluarkan dari output, dan job tetap `complete`**
+   selama yang dikeluarkan tidak lebih dari separuh. Gateway tidak diberi tahu jumlahnya
+   (`result_summary = null`). Hanya log service yang mencatatnya. Bila gateway perlu tahu,
+   itu harus lewat kontrak (`dtugm/naraga-contract`).
 3. **Angka "24 bangunan dengan disagreement > 1 m" (16%) lebih tinggi dari tile DKI**
    (28 dari 323 = 9%). Wajar untuk data yang berbeda, tetapi layak dilihat: bisa jadi RS
    Surabaya lebih kasar, atau atapnya lebih bertingkat. Periksa di Langkah C.

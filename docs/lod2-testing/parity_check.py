@@ -173,6 +173,11 @@ def main() -> int:
     for report in (rd, pd):
         report.pop("elapsed_seconds")
         report.pop("output_file")
+    # Fields the port added on top of the reference (e.g. ground_source) are not
+    # part of the parity claim; compare only what both sides report.
+    for ref_b, port_b in zip(rd["buildings"], pd["buildings"], strict=True):
+        for key in set(port_b) - set(ref_b):
+            del port_b[key]
     if rd != pd:
         failures.append("QA reports differ")
 

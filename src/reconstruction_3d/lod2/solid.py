@@ -48,14 +48,16 @@ class SolidError(RuntimeError):
 
 def _outline_rings(
     outline: BaseGeometry | None, grid: Grid
-) -> tuple[list[PlanKey], list[list[PlanKey]]]:
-    """Exterior and interior key rings of the roof outline.
+) -> tuple[list[PlanKey], list[list[PlanKey]], Polygon | None]:
+    """Exterior and interior key rings of the roof outline, plus the part kept.
 
-    A MultiPolygon outline cannot be one Solid; the largest part is kept and the
-    rest reported, rather than emitting a shell that silently omits area.
+    A MultiPolygon outline cannot be one Solid; the largest part is kept (returned
+    as the third item, so the caller can drop roof faces outside it) and the rest
+    reported. The third item is None when the outline was already one polygon.
     """
     if outline is None:
         raise SolidError("no roof outline")
+    kept: Polygon | None = None
     if isinstance(outline, MultiPolygon):
         parts = sorted(outline.geoms, key=lambda g: float(g.area), reverse=True)
         dropped = sum(float(g.area) for g in parts[1:])
@@ -64,7 +66,7 @@ def _outline_rings(
             len(parts),
             dropped,
         )
-        outline = parts[0]
+        outline = kept = parts[0]
     if not isinstance(outline, Polygon):
         raise SolidError(f"unusable roof outline of type {outline.geom_type}")
 
@@ -77,7 +79,7 @@ def _outline_rings(
         keys = grid.ring_keys(ring.coords)
         if keys is not None:
             interiors.append(keys)
-    return exterior, interiors
+    return exterior, interiors, kept
 
 
 def _wall_quads(
@@ -117,7 +119,11 @@ def build_solid(
     params: LOD2Params,
 ) -> tuple[list[CityFace], list[int]]:
     """Build the exterior shell (boundaries[0]) and its per-face semantic indices."""
-    exterior, interiors = _outline_rings(outline, grid)
+    exterior, interiors, kept = _outline_rings(outline, grid)
+    if kept is not None:
+        # Walls and ground exist only for the kept part. A roof face from a dropped
+        # part would have edges with no twin, i.e. a guaranteed open shell.
+        faces = [f for f in faces if kept.contains(f.polygon.representative_point())]
 
     missing = [k for k in exterior if k not in z_top]
     for ring in interiors:

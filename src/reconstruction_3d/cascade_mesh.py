@@ -44,6 +44,11 @@ _INPUTS: tuple[tuple[str, tuple[str, ...], str], ...] = (
 
 _CHUNK = 1 << 20
 
+# Above this share of buildings failing validation the tile is judged unusable and
+# the job fails instead of completing with a hollowed-out model. Tunable: the product
+# threshold is still open (quality reporting, team issue list).
+MAX_SKIPPED_FRACTION = 0.5
+
 
 def validate_request(request: Any) -> None:
     """Raise ValueError unless the request can run through cascade_mesh.
@@ -68,6 +73,15 @@ def validate_request(request: Any) -> None:
             )
     if not request.output_upload_urls:
         raise ValueError("no output_upload_urls to write the CityJSON to")
+
+
+def _check_skipped(n_skipped: int, n_buildings: int) -> None:
+    """Fail the job when too many buildings were left out to call the result a model."""
+    if n_buildings and n_skipped / n_buildings > MAX_SKIPPED_FRACTION:
+        raise RuntimeError(
+            f"{n_skipped} of {n_buildings} buildings failed validation; "
+            "the inputs (roof structure vs DSM/DTM) likely disagree"
+        )
 
 
 async def _download(client: httpx.AsyncClient, key: str, url: str, dest: Path) -> None:
@@ -112,15 +126,24 @@ async def _with_heartbeat[T](
 
     The contract's heartbeat has to keep flowing while one long download or one
     large tile is being processed, not just between steps.
+
+    asyncio.wait() does not cancel what it waits on, so when the job is cancelled or
+    times out, `work` is cancelled here explicitly. Otherwise an in-flight upload would
+    still complete a PUT for a job the gateway already considers dead. (A to_thread
+    worker cannot be interrupted this way; run() stops it with a threading.Event.)
     """
     task = asyncio.ensure_future(work)
-    # If we are cancelled mid-work, nobody awaits the task; consume its outcome.
+    # Consume the outcome so a cancelled or failed task is never reported as unretrieved.
     task.add_done_callback(lambda t: t.cancelled() or t.exception())
-    while True:
-        done, _ = await asyncio.wait({task}, timeout=interval)
-        if done:
-            return task.result()
-        await report_progress(progress())
+    try:
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=interval)
+            if done:
+                return task.result()
+            await report_progress(progress())
+    finally:
+        if not task.done():
+            task.cancel()
 
 
 async def run(
@@ -158,6 +181,9 @@ async def run(
             input_dsm=str(paths["dsm"]),
             input_dtm=str(paths["dtm"]),
             output_file=str(output),
+            # Never ship a solid that failed validation: nothing downstream can tell,
+            # since result_summary carries no quality signal yet.
+            on_invalid="skip",
         )
 
         def on_progress(_message: str, percent: int) -> None:
@@ -176,9 +202,13 @@ async def run(
             cancel.set()
 
         log.info("job %s: LOD2 %s", request.job_id, report.summary)
-        if report.n_not_watertight:
+        _check_skipped(report.n_skipped, report.n_buildings_in)
+        if report.n_skipped:
             log.warning(
-                "job %s: %d buildings are not watertight", request.job_id, report.n_not_watertight
+                "job %s: %d of %d buildings failed validation and were left out",
+                request.job_id,
+                report.n_skipped,
+                report.n_buildings_in,
             )
 
         await report_progress(90)
@@ -187,7 +217,9 @@ async def run(
         )
         size_bytes = output.stat().st_size
 
-    crs = f"EPSG:{report.crs_epsg}" if report.crs_epsg is not None else "EPSG:4326"
+    if report.crs_epsg is None:  # generate_lod2 sets it or raises; never guess a CRS
+        raise RuntimeError("LOD2 report carries no CRS")
+    crs = f"EPSG:{report.crs_epsg}"
     draft: dict[str, Any] = {
         "name": "lod2-buildings",
         # DatasetFormat has no `cityjson` yet; the upload slot's format is the only

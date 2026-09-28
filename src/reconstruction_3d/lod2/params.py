@@ -70,7 +70,9 @@ class LOD2Params:
     # --- behaviour ---
     id_field: str = "uuid_bgn"
     triangulate_roof: bool = True
-    on_invalid: str = "warn"  # warn | strict | skip
+    # warn = write it anyway (the reference's default) | strict = raise | skip = leave it
+    # out. The service passes "skip" (cascade_mesh.run): it must not ship broken solids.
+    on_invalid: str = "warn"
     z_disagreement_warn: float = 1.0  # m
 
     def __post_init__(self) -> None:
@@ -171,6 +173,7 @@ class BuildingReport:
     height: float = 0.0
     volume: float = 0.0
     roof_source: str = "segmented"  # segmented | fallback_flat
+    ground_source: str = "dtm"  # dtm | dsm_surroundings
     ground_clamped: bool = False
     watertight: bool = True
     problems: list[str] = field(default_factory=list)
@@ -189,6 +192,7 @@ class BuildingReport:
             "height": round(self.height, 3),
             "volume": round(self.volume, 3),
             "roof_source": self.roof_source,
+            "ground_source": self.ground_source,
             "ground_clamped": self.ground_clamped,
             "watertight": self.watertight,
             "problems": self.problems,

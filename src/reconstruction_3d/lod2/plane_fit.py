@@ -140,6 +140,24 @@ def plane_for_face(
     return RoofPlane.horizontal(ground_z + params.min_building_height, "fallback_flat")
 
 
+# Ring around a footprint sampled for the ground when the DTM has nothing under it.
+# The inner offset skips the mixed eave pixels; the outer bound stays local.
+GROUND_RING_INNER = 1.0  # m
+GROUND_RING_OUTER = 5.0  # m
+
+
+def ground_from_dsm(footprint: Polygon, dsm: RasterView) -> float | None:
+    """Ground height from the DSM just outside a footprint, or None if it is empty too.
+
+    The 10th percentile of a 1-5 m ring: streets and yards around a building sit at
+    the bottom of that distribution, neighbouring roofs and trees at the top.
+    """
+    ring = footprint.buffer(GROUND_RING_OUTER).difference(footprint.buffer(GROUND_RING_INNER))
+    if ring.is_empty:
+        return None
+    return dsm.statistic(ring, "p10", all_touched=True)
+
+
 def building_reference_z(footprint: Polygon, dsm: RasterView) -> float | None:
     """A single representative roof height for a whole footprint.
 

@@ -25,7 +25,7 @@ from .cityjson import CityJSONBuilder
 from .grid import Grid, VertexPool
 from .params import BuildingReport, LOD2Params, QAReport
 from .partition import partition_footprint, roof_union
-from .plane_fit import building_reference_z, plane_for_face
+from .plane_fit import building_reference_z, ground_from_dsm, plane_for_face
 from .raster import RasterView
 from .reconcile import reconcile
 from .solid import SolidError, build_solid
@@ -92,7 +92,8 @@ def generate_lod2(
     dsm = RasterView(params.input_dsm)
     dtm = RasterView(params.input_dtm) if params.input_dtm else None
     try:
-        epsg = io_vector.check_crs_agreement(buildings, roofs, dsm.epsg, dtm.epsg if dtm else None)
+        rasters = {"DSM": dsm.epsg} | ({"DTM": dtm.epsg} if dtm else {})
+        epsg = io_vector.check_crs_agreement(buildings, roofs, rasters)
         report.crs_epsg = epsg
 
         emit("Matching roof segments to buildings", 8)
@@ -163,6 +164,11 @@ def generate_lod2(
         if not len(builder):
             raise LOD2Error("no buildings could be built")
 
+        # A cancel after the last building must not write: the caller may already have
+        # removed the directory output_file points into.
+        if cancelled():
+            raise LOD2Cancelled("LOD2 generation cancelled")
+
         if params.output_file:
             emit(f"Writing CityJSON {params.cityjson_version}", 95)
             builder.write(params.output_file, pool, params.cityjson_version)
@@ -189,8 +195,12 @@ def _build_one(
     params: LOD2Params,
     erode_distance: float,
 ) -> BuildingReport:
-    """One building, start to finish. Never raises (unless strict); records instead."""
+    """One building, start to finish. Never raises (unless strict); records instead.
+
+    A building that is not written leaves no vertices behind in the shared pool.
+    """
     record = BuildingReport(object_id=object_id)
+    mark = len(pool)
 
     try:
         faces, method = partition_footprint(footprint, segments, params, grid)
@@ -199,11 +209,20 @@ def _build_one(
         if method in ("no_segments", "fallback"):
             record.roof_source = "fallback_flat"
 
-        ground_seed = 0.0
+        ground: float | None = None
         if dtm is not None:
-            value = dtm.statistic(footprint, params.ground_statistic)
-            if value is not None:
-                ground_seed = value
+            ground = dtm.statistic(footprint, params.ground_statistic)
+        if ground is None:
+            # DTM hole or footprint outside its extent. Never fall back to an absolute
+            # 0 m: the walls would reach sea level and still pass the volume check.
+            ground = ground_from_dsm(footprint, dsm)
+            if ground is None:
+                raise SolidError("no ground height: DTM and the DSM around the footprint are empty")
+            record.ground_source = "dsm_surroundings"
+            log.warning(
+                "%s: no DTM under the footprint; ground taken from the DSM around it", object_id
+            )
+        ground_seed = ground
         reference_z = building_reference_z(footprint, dsm)
 
         for face in faces:
@@ -263,12 +282,14 @@ def _build_one(
                 raise SolidError(summary)
             log.warning("%s: %s", object_id, summary)
             if params.on_invalid == "skip":
+                pool.rollback(mark)
                 return record
 
         builder.add_building(object_id, attributes, shell, semantics)
         return record
 
     except SolidError as exc:
+        pool.rollback(mark)
         if params.on_invalid == "strict":
             raise
         record.watertight = False
@@ -276,6 +297,7 @@ def _build_one(
         log.warning("%s skipped: %s", object_id, exc)
         return record
     except Exception as exc:  # one bad building must not lose the tile
+        pool.rollback(mark)
         if params.on_invalid == "strict":
             raise
         record.watertight = False

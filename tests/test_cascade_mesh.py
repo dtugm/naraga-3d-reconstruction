@@ -6,8 +6,11 @@ synthetic gable inputs, presigned PUT of the output).
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +20,7 @@ from fastapi.testclient import TestClient
 
 pytest.importorskip("geopandas")  # needs the `geo` extra: uv sync --extra geo
 
+from reconstruction_3d import cascade_mesh  # noqa: E402
 from reconstruction_3d.jobs import PREFIX  # noqa: E402
 from reconstruction_3d.main import app  # noqa: E402
 
@@ -150,3 +154,49 @@ def test_download_failure_never_leaks_signed_url(tmp_path: Path) -> None:
     assert terminal["status"] == "failed"
     assert "s3cr3t" not in terminal["error_message"]
     assert "dsm" in terminal["error_message"]
+
+
+def test_cancel_mid_upload_never_lands_a_put(tmp_path: Path) -> None:
+    """DELETE while the output PUT is in flight must abort the PUT, not let it finish.
+
+    The storage stub holds each PUT open for a moment before recording it. Before the
+    fix, cancelling the job left the upload task running, so the PUT still landed for
+    a job the gateway already considered cancelled.
+    """
+    files = write_gable_inputs(tmp_path)
+    job_id = "00000000-0000-4000-8000-0000000000c4"
+    events: list[dict[str, Any]] = []
+    puts: list[bytes] = []
+    put_started = threading.Event()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if request.method == "GET" and url.startswith("http://storage.local/get/"):
+            name = request.url.path.rsplit("/", 1)[1]
+            return httpx.Response(200, content=files[name].read_bytes())
+        if request.method == "PUT" and url == PUT_URL:
+            put_started.set()
+            await asyncio.sleep(0.5)  # the upload is in flight
+            puts.append(request.content)
+            return httpx.Response(200)
+        events.append(json.loads(request.content))
+        return httpx.Response(200, json={"received": True})
+
+    with TestClient(app) as client:
+        app.state.http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        request = _cascade_request(job_id, files)
+        assert client.post(f"{PREFIX}/jobs", json=request, headers=AUTH).status_code == 202
+        assert put_started.wait(timeout=30), "the job never reached the upload"
+
+        assert client.delete(f"{PREFIX}/jobs/{job_id}", headers=AUTH).status_code == 202
+        time.sleep(1.5)  # well past the moment the stub would have recorded the PUT
+
+        assert puts == []
+        assert all(e["status"] == "processing" for e in events)  # nothing after cancel
+
+
+def test_too_many_invalid_buildings_fail_the_job() -> None:
+    cascade_mesh._check_skipped(0, 0)  # an empty tile is LOD2Error's job, not this check
+    cascade_mesh._check_skipped(5, 10)  # exactly the threshold still completes
+    with pytest.raises(RuntimeError, match="6 of 10 buildings failed validation"):
+        cascade_mesh._check_skipped(6, 10)

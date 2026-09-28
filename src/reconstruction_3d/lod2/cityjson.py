@@ -87,14 +87,18 @@ class CityJSONBuilder:
 
     def write(self, path: str, pool: VertexPool, version: str = "1.1") -> str:
         """Serialise atomically (temp file + os.replace): a truncated file that
-        still parses is worse than no file."""
+        still parses is worse than no file.
+
+        The target directory must already exist. It belongs to the caller (in the
+        service, a per-job temp dir), and recreating it after the caller removed it
+        would leak the whole output into /tmp.
+        """
         doc = self.document(pool)
         if version == "1.0":
             doc = downgrade_to_10(doc)
         elif version != "1.1":
             raise ValueError(f"unsupported CityJSON version {version!r}")
         directory = os.path.dirname(os.path.abspath(path)) or "."
-        os.makedirs(directory, exist_ok=True)
 
         handle, temporary = tempfile.mkstemp(suffix=".json", prefix=".lod2-", dir=directory)
         try:

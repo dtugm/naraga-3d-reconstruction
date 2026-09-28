@@ -115,16 +115,23 @@ roof structure + DSM + DTM, written as **CityJSON 1.1** (one `Solid` per buildin
   into a per-job temp dir → `lod2.generate_lod2` via `asyncio.to_thread`, heartbeating
   at `min(heartbeat_interval_seconds / 2, 5)` s through `_with_heartbeat` → PUT the
   CityJSON (explicit `Content-Length`; presigned PUTs reject chunked bodies) to
-  `output_upload_urls[0]`. On cancel or timeout a `threading.Event` makes the worker
-  thread stop between buildings.
+  `output_upload_urls[0]`. On cancel or timeout, `_with_heartbeat` cancels the in-flight
+  download/upload task (asyncio.wait alone would let a PUT land for a dead job) and a
+  `threading.Event` makes the worker thread stop between buildings and before the write.
 - `lod2/` is a typed rewrite of the external reference
   `sam-interactive-github/ai/lod_generation_v2` (never imported or vendored), one module
   per stage: `partition` → `plane_fit` → `reconcile` → `triangulate` → `solid` →
   `validate` → `cityjson`, orchestrated by `core.generate_lod2(params, progress_cb,
   should_cancel)`. It is synchronous, never writes to its inputs, and validates every
-  shell (half-edge closure + positive signed volume + volume plausibility). A building
-  that fails validation is still written and logged (`on_invalid="warn"`); the job stays
-  `complete`.
+  shell (half-edge closure + positive signed volume + volume plausibility).
+- The service runs it with **`on_invalid="skip"`**: a building that fails validation is
+  left out (its vertices are rolled back out of the shared pool) and logged. The job
+  fails instead when more than `MAX_SKIPPED_FRACTION` (0.5) of the buildings are left
+  out. The library default stays `"warn"`, the reference's behaviour, so parity with the
+  reference can still be checked.
+- Inputs must share one **projected** CRS with an EPSG code (`check_crs_agreement`): the
+  tolerances are metric. A DTM hole never means ground = 0 m; the ground then comes from
+  the DSM 1–5 m around the footprint (`ground_source = "dsm_surroundings"`).
 - Progress: download 5 → 10, pipeline 10 → 88, upload 90, terminal 100.
 
 **`dream3d` (stub, `_run_placeholder`)** — sleeps 3 × 0.05s, emits `25/50/75`, and

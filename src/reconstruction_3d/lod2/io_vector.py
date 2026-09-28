@@ -11,11 +11,12 @@ hands CityJSON to naraga-converter, not to that viewer.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 from uuid import uuid4
 
 import geopandas as gpd
+from pyproj import CRS
 from shapely import make_valid, set_precision
 from shapely.errors import GEOSException
 from shapely.geometry.base import BaseGeometry
@@ -26,14 +27,22 @@ from .params import LOD2Params
 log = logging.getLogger(__name__)
 
 
-def _unique_id(raw: object, seen: dict[str, int]) -> str:
-    """A unique, non-empty string id; CityObject ids must not collide."""
+def _unique_id(raw: object, used: set[str]) -> str:
+    """A unique, non-empty string id; CityObject ids must not collide.
+
+    Suffixes are checked against every id already handed out, not just against
+    repeats of the same source value: with source ids `a_1, a, a` a per-value counter
+    would give the second `a` the id `a_1` again.
+    """
     text = "" if raw is None else str(raw).strip()
     if text in ("", "None", "nan"):
         text = uuid4().hex
-    count = seen.get(text, 0)
-    seen[text] = count + 1
-    return text if count == 0 else f"{text}_{count}"
+    candidate, n = text, 0
+    while candidate in used:
+        n += 1
+        candidate = f"{text}_{n}"
+    used.add(candidate)
+    return candidate
 
 
 def _explode_to_singlepart(gdf: Any) -> Any:
@@ -153,12 +162,12 @@ def load_buildings(params: LOD2Params) -> Any:
         )
 
     field = params.id_field
-    seen: dict[str, int] = {}
+    used: set[str] = set()
     if field in gdf.columns:
         # Preserve ids already assigned; only fill the blanks.
-        gdf[field] = [_unique_id(v, seen) for v in gdf[field]]
+        gdf[field] = [_unique_id(v, used) for v in gdf[field]]
     else:
-        gdf[field] = [_unique_id(None, seen) for _ in range(len(gdf))]
+        gdf[field] = [_unique_id(None, used) for _ in range(len(gdf))]
 
     log.info("loaded %d building outlines", len(gdf))
     return gdf
@@ -210,26 +219,36 @@ def assign_roofs_to_buildings(buildings: Any, roofs: Any) -> dict[int, list[int]
     return mapping
 
 
-def check_crs_agreement(
-    buildings: Any,
-    roofs: Any,
-    dsm_epsg: int | None,
-    dtm_epsg: int | None,
-) -> int:
-    """Fail loudly on mixed reference systems, before any expensive work."""
-    found: dict[str, int | None] = {
-        "building outline": buildings.crs.to_epsg(),
-        "DSM": dsm_epsg,
-    }
+def check_crs_agreement(buildings: Any, roofs: Any, rasters: Mapping[str, int | None]) -> int:
+    """Fail loudly on unusable or mixed reference systems, before any expensive work.
+
+    `rasters` maps each raster that is present ("DSM", and "DTM" when given) to its
+    EPSG code. Every input must have one: an input with no CRS, or one GDAL cannot
+    match to an EPSG code, would otherwise be silently assumed to agree. The shared
+    CRS must also be projected, because every tolerance in LOD2Params is in metres
+    (0.01 m snapping, 1 m² segments, 2 m minimum height).
+    """
+    found: dict[str, int | None] = {"building outline": buildings.crs.to_epsg()}
     if not roofs.empty:
         found["roof structure"] = roofs.crs.to_epsg()
-    if dtm_epsg is not None:
-        found["DTM"] = dtm_epsg
+    found.update(rasters)
 
-    distinct = {v for v in found.values() if v is not None}
+    missing = [name for name, code in found.items() if code is None]
+    if missing:
+        raise ValueError(
+            f"no EPSG code for: {', '.join(missing)}; every input needs a CRS "
+            "that maps to an EPSG code"
+        )
+    distinct = set(found.values())
     if len(distinct) > 1:
         detail = ", ".join(f"{k}=EPSG:{v}" for k, v in found.items())
         raise ValueError(f"inputs are in different reference systems: {detail}")
-    if not distinct:
-        raise ValueError("could not determine an EPSG code for any input")
-    return distinct.pop()
+
+    epsg = distinct.pop()
+    assert epsg is not None  # `missing` above already rejected None
+    if CRS.from_epsg(epsg).is_geographic:
+        raise ValueError(
+            f"EPSG:{epsg} is geographic (degrees), but LOD2 tolerances are in metres; "
+            "reproject every input to a projected CRS such as UTM"
+        )
+    return epsg
