@@ -67,6 +67,12 @@ class CallbackSender:
         self._client = client
         self._store = store
 
+    @property
+    def client(self) -> httpx.AsyncClient:
+        """The shared app client, so run_job's storage I/O goes through the same
+        (test-swappable) transport as the callbacks."""
+        return self._client
+
     async def send(
         self,
         status: str,

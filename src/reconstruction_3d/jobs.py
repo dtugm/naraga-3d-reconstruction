@@ -6,7 +6,8 @@ StateStore: idempotency and the terminal-callback outbox survive a restart, and
 startup recovery reports jobs orphaned by a crash instead of leaving the gateway
 to wait out the reaper timeout.
 
-REPLACE run_job() with the real 3D Reconstruction pipeline; keep everything around it — the
+run_job() dispatches per model (cascade_mesh is real, dream3d is still a placeholder);
+keep everything around it — the
 auth check, idempotent 409, callback sequencing, cancellation, timeout and recovery
 are the contract rules that are easy to get wrong.
 """
@@ -21,11 +22,12 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 from uuid import uuid4
 
+import httpx
 from fastapi import APIRouter, FastAPI, Header, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from . import __version__
+from . import __version__, cascade_mesh
 from .callbacks import CallbackSender, build_callback, drain_outbox_forever, rfc3339_now
 from .config import get_settings
 from .contract.models import (
@@ -111,20 +113,33 @@ def _estimate_credits(input_datasets: Any) -> tuple[int, int]:
 
 
 async def run_job(
-    request: Any, report_progress: Callable[[int], Awaitable[None]]
+    request: Any,
+    report_progress: Callable[[int], Awaitable[None]],
+    http: httpx.AsyncClient,
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, int]:
-    """REPLACE THIS with the real 3D Reconstruction pipeline.
+    """The 3D Reconstruction pipeline, one branch per model.
 
     Returns (output dataset drafts, result_summary or None, credits_used).
-    A real implementation streams inputs from request.input_datasets[...].signed_url,
-    writes each output with an HTTP PUT to request.output_upload_urls[n].url (always
-    under request.output_prefix), returns this service's result model as a dict, and
-    MUST call report_progress at least every request.heartbeat_interval_seconds.
+    Every branch streams inputs from request.input_datasets[...].signed_url, PUTs
+    its output to request.output_upload_urls[n].url (always under
+    request.output_prefix), and MUST call report_progress at least every
+    request.heartbeat_interval_seconds.
 
-    CRITICAL: PyTorch/GDAL/PDAL code is synchronous. Run it via
+    CRITICAL: GDAL/PDAL/geo code is synchronous. Run it via
     `await asyncio.to_thread(...)` (or a process pool) — blocking the event loop
     freezes /health and the orchestrator kills the container mid-job.
     """
+    if str(request.params.model) == "cascade_mesh":
+        drafts, result_summary = await cascade_mesh.run(request, report_progress, http)
+        credits_used, _ = _estimate_credits(request.input_datasets)
+        return drafts, result_summary, credits_used
+    return await _run_placeholder(request, report_progress)
+
+
+async def _run_placeholder(
+    request: Any, report_progress: Callable[[int], Awaitable[None]]
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None, int]:
+    """REPLACE with the dream3d (Geoflow) pipeline — still a simulation."""
     for pct in (25, 50, 75):
         await asyncio.sleep(0.05)  # simulated work; also gives cancellation a window
         await report_progress(pct)
@@ -155,7 +170,9 @@ async def _execute(job_id: str, request: Any, sender: CallbackSender, store: Sta
     try:
         async with asyncio.timeout(float(request.max_job_duration_seconds)):
             await sender.send("processing", 0)
-            drafts, result_summary, credits_used = await run_job(request, report_progress)
+            drafts, result_summary, credits_used = await run_job(
+                request, report_progress, sender.client
+            )
         store.set_status(job_id, "complete", 100)
         await sender.send(
             "complete",
