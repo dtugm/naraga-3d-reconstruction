@@ -18,7 +18,10 @@ jobs:
           version: "0.5.11"
           enable-cache: true
 
-      - run: uv sync --frozen
+      # --extra geo: the cascade_mesh pipeline (reconstruction_3d.lod2) imports
+      # numpy/shapely/geopandas/rasterio, so mypy needs them and its tests must run
+      # here rather than skip.
+      - run: uv sync --frozen --extra geo
 
       # No --fix in CI: the job must FAIL on a violation, not rewrite files.
       - name: Lint

@@ -8,6 +8,11 @@ provide one here. Environment variables beat .env in pydantic-settings, so a loc
 import os
 
 os.environ["INTERNAL_SERVICE_TOKEN"] = "test-token"
+# The rasterio/pyproj wheels bundle their own PROJ and GDAL data. A machine-wide
+# PROJ_LIB/GDAL_DATA from another install (PostGIS, QGIS) points them at an older
+# proj.db and every CRS lookup fails ("DATABASE.LAYOUT.VERSION.MINOR").
+for _var in ("PROJ_LIB", "PROJ_DATA", "GDAL_DATA"):
+    os.environ.pop(_var, None)
 
 from collections.abc import Iterator  # noqa: E402
 from pathlib import Path  # noqa: E402
