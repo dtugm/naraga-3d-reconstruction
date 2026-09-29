@@ -455,8 +455,6 @@ class Model1(StrEnum):
 class OutputFormat1(StrEnum):
     las = 'las'
     laz = 'laz'
-    field_3dtiles = '3dtiles'
-    geotiff = 'geotiff'
 
 
 class PointCloudClassificationParams(BaseModel):
@@ -482,16 +480,17 @@ class PointsByClass(RootModel[int]):
 class OutputFormatsGeneratedEnum1(StrEnum):
     las = 'las'
     laz = 'laz'
-    field_3dtiles = '3dtiles'
-    geotiff = 'geotiff'
 
 
 class PointCloudClassificationResult(BaseModel):
     """
-    A `geotiff` output from this service carries `dataset_role: dtm` or `dsm`, so its
-    result can feed 3D Reconstruction's `elevation_source: dtm_dsm` path directly.
-    This is the pipeline the PDF's single `dataset_type` enum made inexpressible
-    (CONTRACT-CHANGES A1).
+    This service produces classified point clouds only (`las`, `laz`). It does not
+    produce a `geotiff` DTM/DSM yet; that output is planned, and until it lands the
+    `dtm`/`dsm` datasets that feed 3D Reconstruction's `elevation_source: dtm_dsm`
+    path come from uploaded datasets. Point clouds for the web (`3dtiles`) are the
+    Converter's job (`ConverterParams.target_format: 3dtiles`), not this service's.
+    The role/format split (CONTRACT-CHANGES A1) is what will let a generated `geotiff`
+    carry `dataset_role: dtm` or `dsm` once it exists.
 
     """
 
