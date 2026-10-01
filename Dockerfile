@@ -11,6 +11,7 @@ WORKDIR /app
 
 RUN micromamba install -y -n base -c conda-forge \
       python=3.12 gdal=3.9 pdal=2.8 python-pdal laspy \
+      fiona rasterio pyproj shapely geopandas \
  && micromamba clean --all --yes
 
 COPY --chown=$MAMBA_USER:$MAMBA_USER pyproject.toml ./

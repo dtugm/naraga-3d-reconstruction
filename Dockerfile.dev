@@ -11,9 +11,12 @@ USER $MAMBA_USER
 
 WORKDIR /app
 
-# Native geo stack first: this layer is large and rarely changes.
+# Native geo stack first: this layer is large and rarely changes. fiona/rasterio/
+# pyproj/shapely/geopandas (the '.[geo]' extra) come from here too: they link GDAL/
+# GEOS/PROJ, and pip would try to compile them (no gcc in this image, no aarch64 wheel).
 RUN micromamba install -y -n base -c conda-forge \
       python=3.12 gdal=3.9 pdal=2.8 python-pdal laspy \
+      fiona rasterio pyproj shapely geopandas \
  && micromamba clean --all --yes
 
 # src/ is bind-mounted over this at runtime; installing it here just resolves the
