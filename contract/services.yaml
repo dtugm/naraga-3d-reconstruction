@@ -18,7 +18,7 @@ services:
     repo: naraga-pointcloud-classification
     python_package: pointcloud_classification
     models: [csf, ptv3]
-    output_formats: [las, laz, 3dtiles, geotiff]
+    output_formats: [las, laz]
   landcover_detection:
     path_segment: landcover-detection
     internal_host: naraga-land-cover-detection   # NOTE: repo has an extra word boundary

@@ -5,13 +5,13 @@ says services MUST re-check, download them into a per-job temp dir, run the
 CPU-bound pipeline in a worker thread while heartbeating, and PUT the result to
 the presigned upload URL.
 
-Two contract gaps are bridged here until dtugm/naraga-contract catches up:
+Roof structure (RS) arrives in Reconstruction3dInputs.roof_structure (contract
+3.0.0 replaced remote_sensing with it).
 
-- Roof structure (RS) has no input key in Reconstruction3dInputs. It is read
-  from `remote_sensing`.
-- DatasetFormat has no `cityjson`. The CityJSON is uploaded to
-  output_upload_urls[0] and naraga-converter turns it into glTF / 3D Tiles;
-  result_summary stays None rather than claiming formats we did not generate.
+One gap remains: `cityjson` is a DatasetFormat since 3.0.0 but is not among this
+service's output_formats, so the CityJSON is uploaded to output_upload_urls[0]
+under that slot's format and naraga-converter turns it into glTF / 3D Tiles;
+result_summary stays None rather than claiming formats we did not generate.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 
 ReportProgress = Callable[[int], Awaitable[None]]
 
-ROOF_STRUCTURE_KEY = "remote_sensing"  # contract has no roof_structure key yet
+ROOF_STRUCTURE_KEY = "roof_structure"
 VECTOR_FORMATS = ("geojson",)
 RASTER_FORMATS = ("geotiff", "cog")
 
@@ -63,8 +63,7 @@ def validate_request(request: Any) -> None:
         raise ValueError("cascade_mesh (dtm_dsm) forbids a point_cloud input")
     missing = [key for key, _, _ in _INPUTS if key not in datasets]
     if missing:
-        hint = f" (roof structure is read from '{ROOF_STRUCTURE_KEY}')"
-        raise ValueError(f"cascade_mesh is missing input(s): {', '.join(missing)}{hint}")
+        raise ValueError(f"cascade_mesh is missing input(s): {', '.join(missing)}")
     for key, formats, _ in _INPUTS:
         fmt = str(datasets[key].dataset_format)
         if fmt not in formats:
@@ -222,8 +221,9 @@ async def run(
     crs = f"EPSG:{report.crs_epsg}"
     draft: dict[str, Any] = {
         "name": "lod2-buildings",
-        # DatasetFormat has no `cityjson` yet; the upload slot's format is the only
-        # contract-valid value. naraga-converter produces the real glTF/3D Tiles.
+        # `cityjson` is not in this service's output_formats, so the upload slot's
+        # format is the only contract-valid value. naraga-converter produces the
+        # real glTF/3D Tiles.
         "dataset_format": str(upload.output_format),
         "dataset_role": "mesh",
         "storage_key": upload.storage_key,  # under request.output_prefix

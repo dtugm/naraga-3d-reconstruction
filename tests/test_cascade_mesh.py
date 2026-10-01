@@ -59,7 +59,7 @@ def _cascade_request(job_id: str, files: dict[str, Path]) -> dict[str, Any]:
         "building_outline": _dataset(
             "bo", "geojson", "building_outline", files["bo"].stat().st_size
         ),
-        "remote_sensing": _dataset("rs", "geojson", None, files["rs"].stat().st_size),
+        "roof_structure": _dataset("rs", "geojson", None, files["rs"].stat().st_size),
         "dsm": _dataset("dsm", "geotiff", "dsm", files["dsm"].stat().st_size),
         "dtm": _dataset("dtm", "geotiff", "dtm", files["dtm"].stat().st_size),
     }
@@ -125,13 +125,13 @@ def test_cascade_mesh_without_roof_structure_fails_clearly(tmp_path: Path) -> No
     with TestClient(app) as client:
         _install_world(files, events, puts)
         request = _cascade_request(job_id, files)
-        del request["input_datasets"]["remote_sensing"]
+        del request["input_datasets"]["roof_structure"]
         assert client.post(f"{PREFIX}/jobs", json=request, headers=AUTH).status_code == 202
         _wait_for_status(client, job_id, "failed")
 
     terminal = events[-1]
     assert terminal["status"] == "failed"
-    assert "remote_sensing" in terminal["error_message"]
+    assert "roof_structure" in terminal["error_message"]
     assert puts == []
 
 

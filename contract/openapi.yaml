@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: NARAGA API
-  version: 3.0.0
-  x-contract-version: 3.0.0
+  version: 3.1.0
+  x-contract-version: 3.1.0
   description: |
     Canonical, machine-readable contract for NARAGA — AI-powered geospatial processing.
 
@@ -591,7 +591,7 @@ components:
           type: array
           minItems: 1
           uniqueItems: true
-          items: { type: string, enum: [las, laz, 3dtiles, geotiff] }
+          items: { type: string, enum: [las, laz] }
         output_crs:
           oneOf: [{ $ref: "#/components/schemas/Crs" }, { type: "null" }]
 
@@ -605,10 +605,13 @@ components:
     PointCloudClassificationResult:
       type: object
       description: |
-        A `geotiff` output from this service carries `dataset_role: dtm` or `dsm`, so its
-        result can feed 3D Reconstruction's `elevation_source: dtm_dsm` path directly.
-        This is the pipeline the PDF's single `dataset_type` enum made inexpressible
-        (CONTRACT-CHANGES A1).
+        This service produces classified point clouds only (`las`, `laz`). It does not
+        produce a `geotiff` DTM/DSM yet; that output is planned, and until it lands the
+        `dtm`/`dsm` datasets that feed 3D Reconstruction's `elevation_source: dtm_dsm`
+        path come from uploaded datasets. Point clouds for the web (`3dtiles`) are the
+        Converter's job (`ConverterParams.target_format: 3dtiles`), not this service's.
+        The role/format split (CONTRACT-CHANGES A1) is what will let a generated `geotiff`
+        carry `dataset_role: dtm` or `dsm` once it exists.
       required: [points_total, points_by_class, output_formats_generated]
       additionalProperties: false
       properties:
@@ -625,7 +628,7 @@ components:
             [{ ground: 120, vegetation: 80, building: 40, unclassified: 5 }]
         output_formats_generated:
           type: array
-          items: { type: string, enum: [las, laz, 3dtiles, geotiff] }
+          items: { type: string, enum: [las, laz] }
 
     LandcoverDetectionParams:
       type: object
@@ -2768,6 +2771,17 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "429":
+          description: |
+            The service is at capacity (its work queue is full). Nothing was accepted, so
+            the gateway may retry the same `job_id` later. `error.code` is `RATE_LIMITED`.
+          headers:
+            Retry-After:
+              description: Seconds the gateway should wait before retrying. Optional.
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
 
   /internal/{service}/jobs/{job_id}:
     delete:
